@@ -1,0 +1,1814 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loguil - E-commerce Profit Tracking SaaS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <style>
+    body {
+      box-sizing: border-box;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .profit-positive { color: #10b981; }
+    .profit-negative { color: #ef4444; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-processing { background: #dbeafe; color: #1e40af; }
+    .status-shipped { background: #e0e7ff; color: #3730a3; }
+    .status-delivered { background: #d1fae5; color: #065f46; }
+    .status-cancelled { background: #fee2e2; color: #991b1b; }
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .slide-up { animation: slideUp 0.3s ease-out; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card-hover { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    .card-hover:hover { 
+      transform: translateY(-4px); 
+      box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+    }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      color: white;
+      font-weight: 600;
+      z-index: 1000;
+      animation: slideInRight 0.3s ease;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    }
+    .toast-success { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+    .toast-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+    .toast-info { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
+    @keyframes slideInRight {
+      from { transform: translateX(400px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .gradient-primary { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+    .gradient-secondary { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }
+    .gradient-danger { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+    .plan-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .plan-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #10b981, #059669);
+    }
+    .plan-card.popular::before {
+      background: linear-gradient(90deg, #f59e0b, #d97706);
+    }
+    .badge-popular {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .input-field { transition: all 0.2s ease; }
+    .input-field:focus {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(16, 185, 129, 0.15);
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="h-full bg-gradient-to-br from-slate-50 via-emerald-50/30 to-slate-50">
+  <div id="app" class="h-full overflow-auto"></div>
+  <div id="toast-container"></div>
+  <script>
+    // ============================================================================
+    // ENGLISH DICTIONARY - All UI text comes from here
+    // ============================================================================
+    const EN = {
+      // Authentication
+      auth: {
+        appName: 'Loguil',
+        tagline: 'E-commerce profit tracking SaaS',
+        signIn: 'Sign in to your account',
+        signUp: 'Create your account',
+        email: 'Email',
+        password: 'Password',
+        passwordPlaceholder: 'Minimum 6 characters',
+        storeName: 'Store Name',
+        storeCurrency: 'Store Currency',
+        currencyHint: 'Choose your store\'s primary currency',
+        signInButton: 'Sign In',
+        signUpButton: 'Start Free Trial',
+        noAccount: 'Don\'t have an account?',
+        hasAccount: 'Already have an account?',
+        signUpLink: 'Sign up free',
+        signInLink: 'Sign in',
+        trialOffer: '14-day free trial, no credit card required',
+        dataSecure: 'Your data is secure and encrypted',
+        
+        // Auth messages
+        userNotFound: 'User not found',
+        incorrectPassword: 'Incorrect password',
+        emailExists: 'This email is already registered',
+        loginSuccess: 'Login successful!',
+        accountCreated: 'Account created! 14 days free trial',
+        accountCreatedEmoji: 'Account created! 14 days free trial 🎉'
+      },
+
+      // Navigation
+      nav: {
+        dashboard: 'Dashboard',
+        orders: 'Orders',
+        plans: 'Plans',
+        logout: 'Logout',
+        logoutSuccess: 'Logged out successfully'
+      },
+
+      // Dashboard
+      dashboard: {
+        title: 'Dashboard',
+        subtitle: 'Overview of your operations',
+        totalRevenue: 'Total Revenue',
+        totalCosts: 'Total Costs',
+        profitLoss: 'Profit/Loss',
+        averageOrder: 'Average Order',
+        operatingCosts: 'Operating costs',
+        perOrder: 'Per order',
+        margin: 'Margin',
+        ordersCount: 'orders',
+        orderStatus: 'Order Status',
+        recentOrders: 'Recent Orders',
+        viewAll: 'View all',
+        noOrders: 'No orders registered yet',
+        customerNotProvided: 'Customer not provided'
+      },
+
+      // Order status
+      status: {
+        pending: 'Pending',
+        processing: 'Processing',
+        shipped: 'Shipped',
+        delivered: 'Delivered',
+        cancelled: 'Cancelled',
+        allStatuses: 'All statuses'
+      },
+
+      // Orders page
+      orders: {
+        title: 'Order Management',
+        subtitle: 'Create and manage your orders',
+        newOrder: 'New Order',
+        searchPlaceholder: 'Search by ID or customer...',
+        allOrders: 'All orders',
+        withProfit: 'With profit',
+        withLoss: 'With loss',
+        noOrdersFound: 'No orders found',
+        tryAdjusting: 'Try adjusting the filters or add a new order',
+        sale: 'Sale',
+        costs: 'Costs',
+        profit: 'Profit'
+      },
+
+      // Order modal
+      orderModal: {
+        newOrder: 'New Order',
+        editOrder: 'Edit Order',
+        orderId: 'Order ID',
+        orderDate: 'Order Date',
+        customerName: 'Customer Name',
+        customerPlaceholder: 'John Smith',
+        status: 'Status',
+        products: 'Product(s)',
+        productsPlaceholder: 'e.g., Nike Air Max Sneakers',
+        productsHint: 'Optional - describe the product(s) in this order',
+        financialValues: 'FINANCIAL VALUES',
+        saleAmount: 'Sale Amount',
+        productCost: 'Product Cost',
+        shipping: 'Shipping',
+        platformFee: 'Platform Fee',
+        otherCosts: 'Other Costs',
+        estimatedProfit: 'Estimated Profit:',
+        notes: 'Notes',
+        notesPlaceholder: 'Order notes...',
+        cancel: 'Cancel',
+        save: 'Save Order',
+        saving: 'Saving...',
+        orderCreated: 'Order created!',
+        orderUpdated: 'Order updated!',
+        errorSaving: 'Error saving order'
+      },
+
+      // Delete modal
+      deleteModal: {
+        title: 'Delete Order?',
+        message: 'This action cannot be undone.',
+        cancel: 'Cancel',
+        delete: 'Delete',
+        deleting: 'Deleting...',
+        deleted: 'Order deleted!',
+        error: 'Error deleting order'
+      },
+
+      // Subscription
+      subscription: {
+        title: 'Manage Subscription',
+        subtitle: 'Choose the ideal plan for your operation',
+        currentPlan: 'Your Current Plan',
+        ordersThisMonth: 'Orders this month',
+        daysRemaining: 'days remaining',
+        limit: 'Limit',
+        ordersPerMonth: 'orders/month',
+        unlimitedOrders: 'Unlimited orders',
+        cancelSubscription: 'Cancel subscription',
+        cancelHint: 'You will lose access to premium features',
+        cancelButton: 'Cancel plan',
+        
+        // Plans
+        freeTrial: 'Free Trial',
+        starter: 'Starter',
+        pro: 'Pro',
+        growth: 'Growth',
+        
+        starterDesc: 'For getting started',
+        proDesc: 'Most popular',
+        growthDesc: 'To scale up',
+        
+        popular: 'POPULAR',
+        perMonth: '/month',
+        
+        // Features
+        upTo100: 'Up to 100 orders/month',
+        upTo1000: 'Up to 1,000 orders/month',
+        completeDashboard: 'Complete dashboard',
+        profitAnalysis: 'Profit analysis',
+        emailSupport: 'Email support',
+        everythingInStarter: 'Everything in Starter +',
+        advancedReports: 'Advanced reports',
+        prioritySupport: 'Priority support',
+        everythingInPro: 'Everything in Pro +',
+        apiIntegration: 'API integration',
+        dedicatedManager: 'Dedicated account manager',
+        
+        chooseStarter: 'Choose Starter',
+        choosePro: 'Choose Pro',
+        chooseGrowth: 'Choose Growth',
+        
+        // Messages
+        stripeInDev: 'Stripe integration in development',
+        prototypeNotice: 'For now, this is a functional prototype',
+        planActivated: 'plan activated successfully!',
+        confirmCancel: 'Are you sure you want to cancel?',
+        confirmCancelDesc: 'You will return to the free plan',
+        no: 'No',
+        yesCancel: 'Yes, cancel',
+        subscriptionCancelled: 'Subscription cancelled. 7 days of access remaining'
+      },
+
+      // Banners
+      banners: {
+        trialPrefix: 'Trial period:',
+        trialDays: 'days remaining',
+        viewPlans: 'View plans',
+        approachingLimit: 'You are approaching the limit of',
+        plan: 'plan:',
+        upgradeNow: 'Upgrade now',
+        limitReached: 'Limit of',
+        limitReachedSuffix: 'reached. Please upgrade!'
+      },
+
+      // Months
+      months: {
+        january: 'January',
+        february: 'February',
+        march: 'March',
+        april: 'April',
+        may: 'May',
+        june: 'June',
+        july: 'July',
+        august: 'August',
+        september: 'September',
+        october: 'October',
+        november: 'November',
+        december: 'December'
+      },
+
+      // Currencies
+      currencies: {
+        BRL: 'Brazilian Real',
+        USD: 'US Dollar',
+        EUR: 'Euro',
+        GBP: 'British Pound',
+        AOA: 'Angolan Kwanza'
+      }
+    };
+
+    // ============================================================================
+    // CURRENCY CONFIGURATION
+    // ============================================================================
+    const CURRENCIES = {
+      BRL: { symbol: 'R$', name: EN.currencies.BRL, locale: 'pt-BR', code: 'BRL' },
+      USD: { symbol: '$', name: EN.currencies.USD, locale: 'en-US', code: 'USD' },
+      EUR: { symbol: '€', name: EN.currencies.EUR, locale: 'de-DE', code: 'EUR' },
+      GBP: { symbol: '£', name: EN.currencies.GBP, locale: 'en-GB', code: 'GBP' },
+      AOA: { symbol: 'Kz', name: EN.currencies.AOA, locale: 'pt-AO', code: 'AOA' }
+    };
+
+    const PLAN_LIMITS = {
+      trial: 999,
+      starter: 100,
+      pro: 1000,
+      growth: 999999
+    };
+
+    const MONTH_NAMES = [
+      EN.months.january, EN.months.february, EN.months.march, EN.months.april,
+      EN.months.may, EN.months.june, EN.months.july, EN.months.august,
+      EN.months.september, EN.months.october, EN.months.november, EN.months.december
+    ];
+
+    // ============================================================================
+    // STATE
+    // ============================================================================
+    let currentUser = null;
+    let allData = [];
+    let allOrders = [];
+    let currentMonth = new Date();
+    let editingOrder = null;
+    let deletingOrder = null;
+
+    const defaultConfig = {
+      app_title: 'Loguil',
+      tagline: 'E-commerce profit tracking SaaS'
+    };
+
+    // ============================================================================
+    // UTILITY FUNCTIONS
+    // ============================================================================
+    function formatCurrency(value) {
+      if (!currentUser || !currentUser.currency) {
+        return new Intl.NumberFormat('en-US', { 
+          style: 'currency', 
+          currency: 'USD' 
+        }).format(value || 0);
+      }
+      
+      const currency = CURRENCIES[currentUser.currency];
+      if (!currency) {
+        return new Intl.NumberFormat('en-US', { 
+          style: 'currency', 
+          currency: 'USD' 
+        }).format(value || 0);
+      }
+      
+      return new Intl.NumberFormat(currency.locale, { 
+        style: 'currency', 
+        currency: currency.code 
+      }).format(value || 0);
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
+    }
+
+    function calculateProfit(order) {
+      const revenue = parseFloat(order.revenue) || 0;
+      const productCost = parseFloat(order.product_cost) || 0;
+      const shippingCost = parseFloat(order.shipping_cost) || 0;
+      const platformFee = parseFloat(order.platform_fee) || 0;
+      const otherCosts = parseFloat(order.other_costs) || 0;
+      return revenue - productCost - shippingCost - platformFee - otherCosts;
+    }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 4000);
+    }
+
+    async function hashPassword(password) {
+      return btoa(password);
+    }
+
+    async function verifyPassword(password, hash) {
+      return btoa(password) === hash;
+    }
+
+    // ============================================================================
+    // RENDERING FUNCTIONS
+    // ============================================================================
+    function renderAuthScreen() {
+      return `
+        <div id="auth-screen" class="min-h-screen flex items-center justify-center p-4">
+          <div class="w-full max-w-md">
+            <div class="text-center mb-8 slide-up">
+              <div class="w-20 h-20 gradient-primary rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-emerald-500/30">
+                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <h1 id="auth-title" class="text-4xl font-extrabold text-slate-900 mb-2">${defaultConfig.app_title}</h1>
+              <p id="auth-tagline" class="text-slate-600 text-lg">${defaultConfig.tagline}</p>
+            </div>
+
+            <div class="bg-white rounded-3xl shadow-2xl p-8 slide-up" style="animation-delay: 0.1s">
+              <div id="login-form">
+                <h2 class="text-2xl font-bold text-slate-900 mb-6">${EN.auth.signIn}</h2>
+                <form onsubmit="handleLogin(event)" class="space-y-4">
+                  <div>
+                    <label for="login-email" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.email}</label>
+                    <input type="email" id="login-email" required 
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="you@email.com">
+                  </div>
+                  <div>
+                    <label for="login-password" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.password}</label>
+                    <input type="password" id="login-password" required 
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="••••••••">
+                  </div>
+                  <button type="submit" class="w-full gradient-primary text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all transform hover:scale-[1.02]">
+                    ${EN.auth.signInButton}
+                  </button>
+                </form>
+                <p class="mt-6 text-center text-slate-600">
+                  ${EN.auth.noAccount}
+                  <button onclick="showRegister()" class="text-emerald-600 font-semibold hover:text-emerald-700">
+                    ${EN.auth.signUpLink}
+                  </button>
+                </p>
+              </div>
+
+              <div id="register-form" class="hidden">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">${EN.auth.signUp}</h2>
+                <p class="text-slate-600 mb-6">${EN.auth.trialOffer}</p>
+                <form onsubmit="handleRegister(event)" class="space-y-4">
+                  <div>
+                    <label for="register-email" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.email}</label>
+                    <input type="email" id="register-email" required 
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="you@email.com">
+                  </div>
+                  <div>
+                    <label for="register-password" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.password}</label>
+                    <input type="password" id="register-password" required minlength="6"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="${EN.auth.passwordPlaceholder}">
+                  </div>
+                  <div>
+                    <label for="store-name" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.storeName}</label>
+                    <input type="text" id="store-name" required 
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="My Online Store">
+                  </div>
+                  <div>
+                    <label for="store-currency" class="block text-sm font-semibold text-slate-700 mb-2">${EN.auth.storeCurrency}</label>
+                    <select id="store-currency" required 
+                      class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white font-semibold">
+                      <option value="BRL">🇧🇷 ${CURRENCIES.BRL.name} (BRL)</option>
+                      <option value="USD">🇺🇸 ${CURRENCIES.USD.name} (USD)</option>
+                      <option value="EUR">🇪🇺 ${CURRENCIES.EUR.name} (EUR)</option>
+                      <option value="GBP">🇬🇧 ${CURRENCIES.GBP.name} (GBP)</option>
+                      <option value="AOA">🇦🇴 ${CURRENCIES.AOA.name} (AOA)</option>
+                    </select>
+                    <p class="text-xs text-slate-500 mt-1.5 font-medium">${EN.auth.currencyHint}</p>
+                  </div>
+                  <button type="submit" class="w-full gradient-primary text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all transform hover:scale-[1.02]">
+                    ${EN.auth.signUpButton}
+                  </button>
+                </form>
+                <p class="mt-6 text-center text-slate-600">
+                  ${EN.auth.hasAccount}
+                  <button onclick="showLogin()" class="text-emerald-600 font-semibold hover:text-emerald-700">
+                    ${EN.auth.signInLink}
+                  </button>
+                </p>
+              </div>
+            </div>
+
+            <p class="text-center text-sm text-slate-500 mt-6">
+              🔒 ${EN.auth.dataSecure}
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMainApp() {
+      return `
+        <div id="main-app">
+          ${renderHeader()}
+          ${renderBanners()}
+          <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            ${renderDashboard()}
+            ${renderOrders()}
+            ${renderSubscription()}
+          </main>
+        </div>
+        ${renderOrderModal()}
+        ${renderDeleteModal()}
+      `;
+    }
+
+    function renderHeader() {
+      return `
+        <header class="bg-white/80 backdrop-blur-lg border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h1 id="header-title" class="text-lg font-bold text-slate-800">${defaultConfig.app_title}</h1>
+                  <p id="header-store" class="text-xs text-slate-500">${currentUser ? currentUser.store_name : ''}</p>
+                </div>
+              </div>
+              <nav class="flex items-center gap-2">
+                <button onclick="showView('dashboard')" id="nav-dashboard" class="nav-btn px-4 py-2 rounded-xl text-sm font-semibold transition-all gradient-primary text-white shadow-md">
+                  ${EN.nav.dashboard}
+                </button>
+                <button onclick="showView('orders')" id="nav-orders" class="nav-btn px-4 py-2 rounded-xl text-sm font-semibold transition-all text-slate-600 hover:bg-slate-100">
+                  ${EN.nav.orders}
+                </button>
+                <button onclick="showView('subscription')" id="nav-subscription" class="nav-btn px-4 py-2 rounded-xl text-sm font-semibold transition-all text-slate-600 hover:bg-slate-100">
+                  ${EN.nav.plans}
+                </button>
+                <button onclick="logout()" class="ml-2 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                  </svg>
+                </button>
+              </nav>
+            </div>
+          </div>
+        </header>
+      `;
+    }
+
+    function renderBanners() {
+      return `
+        <div id="trial-banner" class="hidden bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3 px-4">
+          <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span id="trial-message" class="font-semibold"></span>
+            </div>
+            <button onclick="showView('subscription')" class="bg-white/20 hover:bg-white/30 px-4 py-1.5 rounded-lg font-semibold text-sm transition-all">
+              ${EN.banners.viewPlans}
+            </button>
+          </div>
+        </div>
+        <div id="limit-banner" class="hidden bg-gradient-to-r from-red-500 to-pink-500 text-white py-3 px-4">
+          <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <span id="limit-message" class="font-semibold"></span>
+            </div>
+            <button onclick="showView('subscription')" class="bg-white/20 hover:bg-white/30 px-4 py-1.5 rounded-lg font-semibold text-sm transition-all">
+              ${EN.banners.upgradeNow}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDashboard() {
+      return `
+        <div id="view-dashboard" class="fade-in">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <div>
+              <h2 class="text-3xl font-extrabold text-slate-900">${EN.dashboard.title}</h2>
+              <p class="text-slate-600 mt-1">${EN.dashboard.subtitle}</p>
+            </div>
+            <div class="flex items-center gap-2 bg-white rounded-2xl p-1.5 border-2 border-slate-200 shadow-md">
+              <button onclick="changeMonth(-1)" class="p-2.5 hover:bg-slate-100 rounded-xl transition-all">
+                <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/>
+                </svg>
+              </button>
+              <span id="current-month" class="px-6 py-2 font-bold text-slate-800 min-w-[160px] text-center"></span>
+              <button onclick="changeMonth(1)" class="p-2.5 hover:bg-slate-100 rounded-xl transition-all">
+                <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-slate-100 card-hover">
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-slate-600 text-sm font-bold uppercase tracking-wide">${EN.dashboard.totalRevenue}</span>
+                <div class="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center">
+                  <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+                  </svg>
+                </div>
+              </div>
+              <p id="kpi-revenue" class="text-3xl font-extrabold text-slate-900 mb-1">$0.00</p>
+              <p id="kpi-orders-count" class="text-sm text-slate-500 font-semibold">0 ${EN.dashboard.ordersCount}</p>
+            </div>
+
+            <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-slate-100 card-hover">
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-slate-600 text-sm font-bold uppercase tracking-wide">${EN.dashboard.totalCosts}</span>
+                <div class="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center">
+                  <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+                  </svg>
+                </div>
+              </div>
+              <p id="kpi-costs" class="text-3xl font-extrabold text-slate-900 mb-1">$0.00</p>
+              <p class="text-sm text-slate-500 font-semibold">${EN.dashboard.operatingCosts}</p>
+            </div>
+
+            <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-slate-100 card-hover">
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-slate-600 text-sm font-bold uppercase tracking-wide">${EN.dashboard.profitLoss}</span>
+                <div id="kpi-profit-icon" class="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center">
+                  <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                  </svg>
+                </div>
+              </div>
+              <p id="kpi-profit" class="text-3xl font-extrabold profit-positive mb-1">$0.00</p>
+              <p id="kpi-margin" class="text-sm text-slate-500 font-semibold">${EN.dashboard.margin}: 0%</p>
+            </div>
+
+            <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-slate-100 card-hover">
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-slate-600 text-sm font-bold uppercase tracking-wide">${EN.dashboard.averageOrder}</span>
+                <div class="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center">
+                  <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                  </svg>
+                </div>
+              </div>
+              <p id="kpi-ticket" class="text-3xl font-extrabold text-slate-900 mb-1">$0.00</p>
+              <p class="text-sm text-slate-500 font-semibold">${EN.dashboard.perOrder}</p>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-8 mb-8">
+            <h3 class="text-xl font-extrabold text-slate-900 mb-6">${EN.dashboard.orderStatus}</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+              <div class="text-center p-5 bg-amber-50 rounded-2xl border-2 border-amber-100">
+                <p id="status-pending" class="text-3xl font-extrabold text-amber-600">0</p>
+                <p class="text-sm text-amber-700 font-semibold mt-1">${EN.status.pending}</p>
+              </div>
+              <div class="text-center p-5 bg-blue-50 rounded-2xl border-2 border-blue-100">
+                <p id="status-processing" class="text-3xl font-extrabold text-blue-600">0</p>
+                <p class="text-sm text-blue-700 font-semibold mt-1">${EN.status.processing}</p>
+              </div>
+              <div class="text-center p-5 bg-indigo-50 rounded-2xl border-2 border-indigo-100">
+                <p id="status-shipped" class="text-3xl font-extrabold text-indigo-600">0</p>
+                <p class="text-sm text-indigo-700 font-semibold mt-1">${EN.status.shipped}</p>
+              </div>
+              <div class="text-center p-5 bg-emerald-50 rounded-2xl border-2 border-emerald-100">
+                <p id="status-delivered" class="text-3xl font-extrabold text-emerald-600">0</p>
+                <p class="text-sm text-emerald-700 font-semibold mt-1">${EN.status.delivered}</p>
+              </div>
+              <div class="text-center p-5 bg-red-50 rounded-2xl border-2 border-red-100">
+                <p id="status-cancelled" class="text-3xl font-extrabold text-red-600">0</p>
+                <p class="text-sm text-red-700 font-semibold mt-1">${EN.status.cancelled}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl overflow-hidden">
+            <div class="p-6 border-b-2 border-slate-100 flex justify-between items-center">
+              <h3 class="text-xl font-extrabold text-slate-900">${EN.dashboard.recentOrders}</h3>
+              <button onclick="showView('orders')" class="text-sm text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1">
+                ${EN.dashboard.viewAll}
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </div>
+            <div id="recent-orders" class="divide-y divide-slate-100">
+              <div class="p-12 text-center text-slate-500">
+                <svg class="w-16 h-16 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+                </svg>
+                <p class="font-semibold">${EN.dashboard.noOrders}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderOrders() {
+      return `
+        <div id="view-orders" class="hidden fade-in">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div>
+              <h2 class="text-3xl font-extrabold text-slate-900">${EN.orders.title}</h2>
+              <p class="text-slate-600 mt-1">${EN.orders.subtitle}</p>
+            </div>
+            <button onclick="openOrderModal()" class="flex items-center gap-2 gradient-primary text-white px-6 py-3 rounded-2xl font-bold shadow-xl shadow-emerald-500/30 hover:shadow-2xl hover:shadow-emerald-500/40 transition-all transform hover:scale-105">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+              </svg>
+              ${EN.orders.newOrder}
+            </button>
+          </div>
+
+          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-6 mb-6">
+            <div class="flex flex-col sm:flex-row gap-4">
+              <div class="flex-1">
+                <input type="text" id="search-orders" placeholder="${EN.orders.searchPlaceholder}" 
+                  class="w-full px-5 py-3.5 border-2 border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-medium"
+                  oninput="filterOrders()">
+              </div>
+              <select id="filter-status" onchange="filterOrders()" 
+                class="px-5 py-3.5 border-2 border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white font-semibold">
+                <option value="">${EN.status.allStatuses}</option>
+                <option value="pending">${EN.status.pending}</option>
+                <option value="processing">${EN.status.processing}</option>
+                <option value="shipped">${EN.status.shipped}</option>
+                <option value="delivered">${EN.status.delivered}</option>
+                <option value="cancelled">${EN.status.cancelled}</option>
+              </select>
+              <select id="filter-profit" onchange="filterOrders()" 
+                class="px-5 py-3.5 border-2 border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white font-semibold">
+                <option value="">${EN.orders.allOrders}</option>
+                <option value="profit">${EN.orders.withProfit}</option>
+                <option value="loss">${EN.orders.withLoss}</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="orders-list" class="space-y-4"></div>
+        </div>
+      `;
+    }
+
+    function renderSubscription() {
+      const planNames = {
+        trial: EN.subscription.freeTrial,
+        starter: EN.subscription.starter,
+        pro: EN.subscription.pro,
+        growth: EN.subscription.growth
+      };
+
+      return `
+        <div id="view-subscription" class="hidden fade-in">
+          <div class="mb-8">
+            <h2 class="text-3xl font-extrabold text-slate-900 mb-2">${EN.subscription.title}</h2>
+            <p class="text-slate-600">${EN.subscription.subtitle}</p>
+          </div>
+
+          <div id="current-plan-info" class="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-3xl p-8 text-white mb-8 shadow-2xl">
+            <div class="flex items-start justify-between">
+              <div>
+                <p class="text-emerald-100 font-semibold mb-2">${EN.subscription.currentPlan}</p>
+                <h3 id="current-plan-name" class="text-4xl font-extrabold mb-4">${currentUser ? planNames[currentUser.plan] : EN.subscription.freeTrial}</h3>
+                <p id="current-plan-details" class="text-emerald-50 text-lg"></p>
+              </div>
+              <div class="text-right">
+                <p class="text-emerald-100 font-semibold mb-1">${EN.subscription.ordersThisMonth}</p>
+                <p id="usage-count" class="text-5xl font-extrabold">0</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="plan-card bg-white rounded-3xl border-2 border-slate-200 p-8 shadow-xl hover:shadow-2xl transition-all transform hover:scale-105">
+              <div class="mb-6">
+                <h3 class="text-2xl font-extrabold text-slate-900 mb-2">${EN.subscription.starter}</h3>
+                <p class="text-slate-600 mb-4">${EN.subscription.starterDesc}</p>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-5xl font-extrabold text-slate-900">€9</span>
+                  <span class="text-slate-500 font-semibold">${EN.subscription.perMonth}</span>
+                </div>
+              </div>
+              <ul class="space-y-3 mb-8">
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.upTo100}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.completeDashboard}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.profitAnalysis}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.emailSupport}</span>
+                </li>
+              </ul>
+              <button onclick="subscribeToPlan('starter')" class="w-full gradient-primary text-white font-bold py-4 rounded-2xl shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all transform hover:scale-105">
+                ${EN.subscription.chooseStarter}
+              </button>
+            </div>
+
+            <div class="plan-card popular bg-white rounded-3xl border-2 border-amber-400 p-8 shadow-2xl transform scale-105">
+              <div class="flex justify-between items-start mb-6">
+                <div>
+                  <h3 class="text-2xl font-extrabold text-slate-900 mb-2">${EN.subscription.pro}</h3>
+                  <p class="text-slate-600 mb-4">${EN.subscription.proDesc}</p>
+                </div>
+                <span class="badge-popular">${EN.subscription.popular}</span>
+              </div>
+              <div class="flex items-baseline gap-2 mb-6">
+                <span class="text-5xl font-extrabold text-slate-900">€19</span>
+                <span class="text-slate-500 font-semibold">${EN.subscription.perMonth}</span>
+              </div>
+              <ul class="space-y-3 mb-8">
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.upTo1000}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.everythingInStarter}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.advancedReports}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.prioritySupport}</span>
+                </li>
+              </ul>
+              <button onclick="subscribeToPlan('pro')" class="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-500/30 hover:shadow-xl hover:shadow-amber-500/40 transition-all transform hover:scale-105">
+                ${EN.subscription.choosePro}
+              </button>
+            </div>
+
+            <div class="plan-card bg-white rounded-3xl border-2 border-slate-200 p-8 shadow-xl hover:shadow-2xl transition-all transform hover:scale-105">
+              <div class="mb-6">
+                <h3 class="text-2xl font-extrabold text-slate-900 mb-2">${EN.subscription.growth}</h3>
+                <p class="text-slate-600 mb-4">${EN.subscription.growthDesc}</p>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-5xl font-extrabold text-slate-900">€99</span>
+                  <span class="text-slate-500 font-semibold">${EN.subscription.perMonth}</span>
+                </div>
+              </div>
+              <ul class="space-y-3 mb-8">
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.unlimitedOrders}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.everythingInPro}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.apiIntegration}</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-700">
+                  <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+                  </svg>
+                  <span class="font-semibold">${EN.subscription.dedicatedManager}</span>
+                </li>
+              </ul>
+              <button onclick="subscribeToPlan('growth')" class="w-full gradient-secondary text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/40 transition-all transform hover:scale-105">
+                ${EN.subscription.chooseGrowth}
+              </button>
+            </div>
+          </div>
+
+          <div id="cancel-section" class="hidden mt-8 p-6 bg-slate-50 rounded-2xl border-2 border-slate-200">
+            <div class="flex items-start justify-between">
+              <div>
+                <h4 class="font-bold text-slate-900 mb-2">${EN.subscription.cancelSubscription}</h4>
+                <p class="text-slate-600 text-sm">${EN.subscription.cancelHint}</p>
+              </div>
+              <button onclick="cancelSubscription()" class="px-5 py-2.5 border-2 border-red-200 text-red-600 rounded-xl font-semibold hover:bg-red-50 transition-all">
+                ${EN.subscription.cancelButton}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderOrderModal() {
+      const currencySymbol = currentUser && currentUser.currency ? CURRENCIES[currentUser.currency].symbol : '$';
+      
+      return `
+        <div id="order-modal" class="fixed inset-0 bg-black/60 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl w-full max-w-2xl max-h-[90%] overflow-y-auto shadow-2xl">
+            <div class="p-6 border-b-2 border-slate-100 flex justify-between items-center sticky top-0 bg-white rounded-t-3xl">
+              <h3 id="modal-title" class="text-2xl font-extrabold text-slate-900">${EN.orderModal.newOrder}</h3>
+              <button onclick="closeOrderModal()" class="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                <svg class="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <form id="order-form" class="p-6 space-y-6" onsubmit="handleOrderSubmit(event)">
+              <input type="hidden" id="order-backend-id">
+              
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label for="order-id" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.orderId} *</label>
+                  <input type="text" id="order-id" required placeholder="#12345"
+                    class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                </div>
+                <div>
+                  <label for="order-date" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.orderDate} *</label>
+                  <input type="date" id="order-date" required
+                    class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label for="customer-name" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.customerName}</label>
+                  <input type="text" id="customer-name" placeholder="${EN.orderModal.customerPlaceholder}"
+                    class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                </div>
+                <div>
+                  <label for="order-status" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.status}</label>
+                  <select id="order-status"
+                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white font-semibold">
+                    <option value="pending">${EN.status.pending}</option>
+                    <option value="processing">${EN.status.processing}</option>
+                    <option value="shipped">${EN.status.shipped}</option>
+                    <option value="delivered">${EN.status.delivered}</option>
+                    <option value="cancelled">${EN.status.cancelled}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label for="product-name" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.products}</label>
+                <input type="text" id="product-name" placeholder="${EN.orderModal.productsPlaceholder}"
+                  class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                <p class="text-xs text-slate-500 mt-1.5 font-medium">${EN.orderModal.productsHint}</p>
+              </div>
+
+              <div class="border-t-2 border-slate-100 pt-6">
+                <h4 class="text-sm font-extrabold text-slate-800 mb-4 flex items-center gap-2">
+                  <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  ${EN.orderModal.financialValues}
+                </h4>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label for="revenue" class="block text-sm font-bold text-slate-700 mb-2">
+                      <span id="label-revenue">${EN.orderModal.saleAmount} (${currencySymbol})</span> *
+                    </label>
+                    <input type="number" id="revenue" required step="0.01" min="0" placeholder="0.00"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                  </div>
+                  <div>
+                    <label for="product-cost" class="block text-sm font-bold text-slate-700 mb-2">
+                      <span id="label-cost">${EN.orderModal.productCost} (${currencySymbol})</span> *
+                    </label>
+                    <input type="number" id="product-cost" required step="0.01" min="0" placeholder="0.00"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                  <div>
+                    <label for="shipping-cost" class="block text-sm font-bold text-slate-700 mb-2">
+                      <span id="label-shipping">${EN.orderModal.shipping} (${currencySymbol})</span>
+                    </label>
+                    <input type="number" id="shipping-cost" step="0.01" min="0" placeholder="0.00"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                  </div>
+                  <div>
+                    <label for="platform-fee" class="block text-sm font-bold text-slate-700 mb-2">
+                      <span id="label-fee">${EN.orderModal.platformFee} (${currencySymbol})</span>
+                    </label>
+                    <input type="number" id="platform-fee" step="0.01" min="0" placeholder="0.00"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                  </div>
+                  <div>
+                    <label for="other-costs" class="block text-sm font-bold text-slate-700 mb-2">
+                      <span id="label-other">${EN.orderModal.otherCosts} (${currencySymbol})</span>
+                    </label>
+                    <input type="number" id="other-costs" step="0.01" min="0" placeholder="0.00"
+                      class="input-field w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent font-semibold">
+                  </div>
+                </div>
+              </div>
+
+              <div id="profit-preview" class="bg-gradient-to-br from-slate-50 to-emerald-50 rounded-2xl p-5 border-2 border-emerald-100">
+                <div class="flex justify-between items-center">
+                  <span class="text-sm font-bold text-slate-700">${EN.orderModal.estimatedProfit}</span>
+                  <span id="preview-profit" class="text-2xl font-extrabold profit-positive">$0.00</span>
+                </div>
+              </div>
+
+              <div>
+                <label for="order-notes" class="block text-sm font-bold text-slate-700 mb-2">${EN.orderModal.notes}</label>
+                <textarea id="order-notes" rows="3" placeholder="${EN.orderModal.notesPlaceholder}"
+                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none font-medium"></textarea>
+              </div>
+
+              <div class="flex gap-3 pt-4">
+                <button type="button" onclick="closeOrderModal()" 
+                  class="flex-1 px-5 py-3.5 border-2 border-slate-200 text-slate-700 rounded-2xl font-bold hover:bg-slate-50 transition-all">
+                  ${EN.orderModal.cancel}
+                </button>
+                <button type="submit" id="submit-btn"
+                  class="flex-1 px-5 py-3.5 gradient-primary text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  ${EN.orderModal.save}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDeleteModal() {
+      return `
+        <div id="delete-modal" class="fixed inset-0 bg-black/60 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl">
+            <div class="text-center">
+              <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </div>
+              <h3 class="text-2xl font-extrabold text-slate-900 mb-2">${EN.deleteModal.title}</h3>
+              <p class="text-slate-600 mb-6 font-medium">${EN.deleteModal.message}</p>
+              <div class="flex gap-3">
+                <button onclick="closeDeleteModal()" 
+                  class="flex-1 px-5 py-3 border-2 border-slate-200 text-slate-700 rounded-2xl font-bold hover:bg-slate-50 transition-all">
+                  ${EN.deleteModal.cancel}
+                </button>
+                <button onclick="confirmDelete()" id="confirm-delete-btn"
+                  class="flex-1 px-5 py-3 gradient-danger text-white rounded-2xl font-bold shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all disabled:opacity-50">
+                  ${EN.deleteModal.delete}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ============================================================================
+    // AUTH FUNCTIONS
+    // ============================================================================
+    function showLogin() {
+      document.getElementById('login-form').classList.remove('hidden');
+      document.getElementById('register-form').classList.add('hidden');
+    }
+
+    function showRegister() {
+      document.getElementById('login-form').classList.add('hidden');
+      document.getElementById('register-form').classList.remove('hidden');
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.toLowerCase().trim();
+      const password = document.getElementById('login-password').value;
+
+      const user = allData.find(u => u.type === 'user' && u.email === email);
+      
+      if (!user) {
+        showToast(EN.auth.userNotFound, 'error');
+        return;
+      }
+
+      const validPassword = await verifyPassword(password, user.password_hash);
+      if (!validPassword) {
+        showToast(EN.auth.incorrectPassword, 'error');
+        return;
+      }
+
+      currentUser = user;
+      localStorage.setItem('currentUserId', user.__backendId);
+      showMainApp();
+      showToast(EN.auth.loginSuccess, 'success');
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      const email = document.getElementById('register-email').value.toLowerCase().trim();
+      const password = document.getElementById('register-password').value;
+      const storeName = document.getElementById('store-name').value;
+      const currency = document.getElementById('store-currency').value;
+
+      const existingUser = allData.find(u => u.type === 'user' && u.email === email);
+      if (existingUser) {
+        showToast(EN.auth.emailExists, 'error');
+        return;
+      }
+
+      const passwordHash = await hashPassword(password);
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 14);
+
+      const userData = {
+        type: 'user',
+        email: email,
+        password_hash: passwordHash,
+        store_name: storeName,
+        currency: currency,
+        plan: 'trial',
+        trial_ends: trialEnd.toISOString(),
+        subscription_status: 'active',
+        stripe_customer_id: '',
+        stripe_subscription_id: '',
+        created_at: new Date().toISOString()
+      };
+
+      const result = await window.dataSdk.create(userData);
+      
+      if (result.isOk) {
+        showToast(EN.auth.accountCreatedEmoji, 'success');
+        setTimeout(() => {
+          document.getElementById('login-email').value = email;
+          document.getElementById('login-password').value = password;
+          showLogin();
+        }, 1500);
+      } else {
+        showToast('Error creating account', 'error');
+      }
+    }
+
+    function logout() {
+      currentUser = null;
+      localStorage.removeItem('currentUserId');
+      render();
+      showToast(EN.nav.logoutSuccess, 'info');
+    }
+
+    function showMainApp() {
+      render();
+      updateSubscriptionStatus();
+      updateDashboard();
+      showView('dashboard');
+    }
+
+    // ============================================================================
+    // SUBSCRIPTION MANAGEMENT
+    // ============================================================================
+    function updateSubscriptionStatus() {
+      const trialEnd = new Date(currentUser.trial_ends);
+      const now = new Date();
+      const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+
+      if (currentUser.plan === 'trial' && daysLeft > 0) {
+        document.getElementById('trial-banner').classList.remove('hidden');
+        document.getElementById('trial-message').textContent = 
+          `${EN.banners.trialPrefix} ${daysLeft} ${EN.banners.trialDays}`;
+      } else {
+        document.getElementById('trial-banner').classList.add('hidden');
+      }
+
+      const monthOrders = getOrdersForMonth();
+      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
+      const limit = PLAN_LIMITS[currentUser.plan] || 999;
+
+      if (activeOrders.length >= limit * 0.9 && limit !== 999999) {
+        document.getElementById('limit-banner').classList.remove('hidden');
+        document.getElementById('limit-message').textContent = 
+          `${EN.banners.approachingLimit} ${currentUser.plan.toUpperCase()} ${EN.banners.plan} ${activeOrders.length}/${limit} ${EN.banners.trialDays}`;
+      } else {
+        document.getElementById('limit-banner').classList.add('hidden');
+      }
+
+      updateCurrentPlanDisplay();
+    }
+
+    function updateCurrentPlanDisplay() {
+      const planNames = {
+        trial: EN.subscription.freeTrial,
+        starter: EN.subscription.starter,
+        pro: EN.subscription.pro,
+        growth: EN.subscription.growth
+      };
+
+      const monthOrders = getOrdersForMonth();
+      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
+      const limit = PLAN_LIMITS[currentUser.plan];
+
+      document.getElementById('current-plan-name').textContent = planNames[currentUser.plan];
+      document.getElementById('usage-count').textContent = activeOrders.length;
+      
+      if (currentUser.plan === 'trial') {
+        const trialEnd = new Date(currentUser.trial_ends);
+        const daysLeft = Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24));
+        document.getElementById('current-plan-details').textContent = 
+          `${daysLeft} ${EN.subscription.daysRemaining} • ${EN.subscription.limit}: ${limit} ${EN.subscription.ordersPerMonth}`;
+      } else if (limit === 999999) {
+        document.getElementById('current-plan-details').textContent = EN.subscription.unlimitedOrders;
+      } else {
+        document.getElementById('current-plan-details').textContent = 
+          `${EN.subscription.limit}: ${limit} ${EN.subscription.ordersPerMonth}`;
+      }
+
+      document.getElementById('cancel-section').classList.toggle('hidden', 
+        currentUser.plan === 'trial');
+    }
+
+    async function subscribeToPlan(plan) {
+      showToast(EN.subscription.stripeInDev, 'info');
+      showToast(EN.subscription.prototypeNotice, 'info');
+      
+      const updatedUser = {
+        ...currentUser,
+        plan: plan,
+        subscription_status: 'active',
+        stripe_customer_id: 'demo_customer_id',
+        stripe_subscription_id: 'demo_subscription_id'
+      };
+
+      const result = await window.dataSdk.update(updatedUser);
+      if (result.isOk) {
+        showToast(`${plan.toUpperCase()} ${EN.subscription.planActivated}`, 'success');
+      }
+    }
+
+    async function cancelSubscription() {
+      const confirmation = document.createElement('div');
+      confirmation.innerHTML = `
+        <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px;">
+          <div style="background: white; border-radius: 24px; padding: 32px; max-width: 400px; text-align: center;">
+            <p style="font-size: 18px; font-weight: 600; color: #1e293b; margin-bottom: 16px;">${EN.subscription.confirmCancel}</p>
+            <p style="color: #64748b; margin-bottom: 24px;">${EN.subscription.confirmCancelDesc}</p>
+            <div style="display: flex; gap: 12px;">
+              <button onclick="this.closest('div').parentElement.remove()" style="flex: 1; padding: 12px; border: 2px solid #e2e8f0; border-radius: 12px; font-weight: 600; background: white;">${EN.subscription.no}</button>
+              <button onclick="confirmCancellation()" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border-radius: 12px; font-weight: 600; border: none;">${EN.subscription.yesCancel}</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(confirmation);
+    }
+
+    window.confirmCancellation = async function() {
+      document.querySelector('[onclick="confirmCancellation()"]').closest('div').parentElement.remove();
+      
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7);
+
+      const updatedUser = {
+        ...currentUser,
+        plan: 'trial',
+        trial_ends: trialEnd.toISOString(),
+        subscription_status: 'cancelled',
+        stripe_subscription_id: ''
+      };
+
+      const result = await window.dataSdk.update(updatedUser);
+      if (result.isOk) {
+        showToast(EN.subscription.subscriptionCancelled, 'info');
+      }
+    };
+
+    // ============================================================================
+    // VIEW MANAGEMENT
+    // ============================================================================
+    function showView(view) {
+      document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
+      document.getElementById('view-orders').classList.toggle('hidden', view !== 'orders');
+      document.getElementById('view-subscription').classList.toggle('hidden', view !== 'subscription');
+      
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('gradient-primary', 'text-white', 'shadow-md');
+        btn.classList.add('text-slate-600', 'hover:bg-slate-100');
+      });
+      
+      const activeBtn = document.getElementById(`nav-${view}`);
+      activeBtn.classList.add('gradient-primary', 'text-white', 'shadow-md');
+      activeBtn.classList.remove('text-slate-600', 'hover:bg-slate-100');
+
+      if (view === 'subscription') {
+        updateCurrentPlanDisplay();
+      }
+    }
+
+    // ============================================================================
+    // MONTH NAVIGATION
+    // ============================================================================
+    function changeMonth(delta) {
+      currentMonth.setMonth(currentMonth.getMonth() + delta);
+      updateMonthDisplay();
+      updateDashboard();
+    }
+
+    function updateMonthDisplay() {
+      document.getElementById('current-month').textContent = 
+        `${MONTH_NAMES[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
+    }
+
+    function getOrdersForMonth() {
+      return allOrders.filter(order => {
+        if (!order.order_date) return false;
+        const orderDate = new Date(order.order_date + 'T00:00:00');
+        return orderDate.getMonth() === currentMonth.getMonth() &&
+               orderDate.getFullYear() === currentMonth.getFullYear();
+      });
+    }
+
+    // ============================================================================
+    // DASHBOARD UPDATE
+    // ============================================================================
+    function updateDashboard() {
+      const monthOrders = getOrdersForMonth();
+      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
+      
+      let totalRevenue = 0;
+      let totalCosts = 0;
+      
+      activeOrders.forEach(order => {
+        totalRevenue += parseFloat(order.revenue) || 0;
+        totalCosts += (parseFloat(order.product_cost) || 0) +
+                      (parseFloat(order.shipping_cost) || 0) +
+                      (parseFloat(order.platform_fee) || 0) +
+                      (parseFloat(order.other_costs) || 0);
+      });
+      
+      const profit = totalRevenue - totalCosts;
+      const margin = totalRevenue > 0 ? (profit / totalRevenue * 100) : 0;
+      const avgTicket = activeOrders.length > 0 ? totalRevenue / activeOrders.length : 0;
+      
+      document.getElementById('kpi-revenue').textContent = formatCurrency(totalRevenue);
+      document.getElementById('kpi-orders-count').textContent = `${activeOrders.length} ${EN.dashboard.ordersCount}`;
+      document.getElementById('kpi-costs').textContent = formatCurrency(totalCosts);
+      
+      const profitEl = document.getElementById('kpi-profit');
+      profitEl.textContent = formatCurrency(profit);
+      profitEl.className = `text-3xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'} mb-1`;
+      
+      const profitIcon = document.getElementById('kpi-profit-icon');
+      if (profit >= 0) {
+        profitIcon.className = 'w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center';
+        profitIcon.innerHTML = '<svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>';
+      } else {
+        profitIcon.className = 'w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center';
+        profitIcon.innerHTML = '<svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>';
+      }
+      
+      document.getElementById('kpi-margin').textContent = `${EN.dashboard.margin}: ${margin.toFixed(1)}%`;
+      document.getElementById('kpi-ticket').textContent = formatCurrency(avgTicket);
+      
+      const statusCounts = { pending: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 };
+      monthOrders.forEach(order => {
+        if (statusCounts.hasOwnProperty(order.status)) {
+          statusCounts[order.status]++;
+        }
+      });
+      
+      Object.keys(statusCounts).forEach(status => {
+        document.getElementById(`status-${status}`).textContent = statusCounts[status];
+      });
+      
+      updateRecentOrders();
+      updateSubscriptionStatus();
+    }
+
+    function updateRecentOrders() {
+      const container = document.getElementById('recent-orders');
+      const recentOrders = [...allOrders]
+        .sort((a, b) => new Date(b.order_date) - new Date(a.order_date))
+        .slice(0, 5);
+      
+      if (recentOrders.length === 0) {
+        container.innerHTML = `
+          <div class="p-12 text-center text-slate-500">
+            <svg class="w-16 h-16 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
+            <p class="font-semibold">${EN.dashboard.noOrders}</p>
+          </div>`;
+        return;
+      }
+      
+      container.innerHTML = recentOrders.map(order => {
+        const profit = calculateProfit(order);
+        return `
+          <div class="flex items-center justify-between p-5 hover:bg-slate-50 transition-colors">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center">
+                <span class="text-sm font-bold text-slate-600">#</span>
+              </div>
+              <div>
+                <p class="font-bold text-slate-900">${order.order_id || '-'}</p>
+                <p class="text-sm text-slate-500">${order.customer_name || EN.dashboard.customerNotProvided}</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <p class="font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatCurrency(profit)}</p>
+              <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold status-${order.status}">
+                ${EN.status[order.status]}
+              </span>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    // ============================================================================
+    // ORDERS LIST
+    // ============================================================================
+    function updateOrdersList(orders) {
+      const container = document.getElementById('orders-list');
+      
+      if (orders.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-12 text-center text-slate-500">
+            <svg class="w-20 h-20 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            <p class="text-lg font-bold mb-2">${EN.orders.noOrdersFound}</p>
+            <p class="text-sm">${EN.orders.tryAdjusting}</p>
+          </div>`;
+        return;
+      }
+      
+      container.innerHTML = orders.map(order => {
+        const profit = calculateProfit(order);
+        const totalCost = (parseFloat(order.product_cost) || 0) +
+                          (parseFloat(order.shipping_cost) || 0) +
+                          (parseFloat(order.platform_fee) || 0) +
+                          (parseFloat(order.other_costs) || 0);
+        
+        return `
+          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-6 card-hover">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="flex items-start gap-4">
+                <div class="w-14 h-14 gradient-primary rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/30">
+                  <span class="text-xl font-extrabold text-white">#</span>
+                </div>
+                <div>
+                  <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <h4 class="font-extrabold text-slate-900 text-lg">${order.order_id || '-'}</h4>
+                    <span class="px-3 py-1 rounded-full text-xs font-bold status-${order.status}">
+                      ${EN.status[order.status]}
+                    </span>
+                  </div>
+                  <p class="text-sm text-slate-600 font-semibold">${order.customer_name || EN.dashboard.customerNotProvided}</p>
+                  ${order.product_name ? `<p class="text-xs text-slate-500 mt-0.5 font-medium">📦 ${order.product_name}</p>` : ''}
+                  <p class="text-xs text-slate-400 mt-1 font-semibold">${formatDate(order.order_date)}</p>
+                </div>
+              </div>
+              
+              <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <div class="grid grid-cols-3 gap-4 text-center sm:text-right">
+                  <div>
+                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.sale}</p>
+                    <p class="font-extrabold text-slate-900">${formatCurrency(order.revenue)}</p>
+                  </div>
+                  <div>
+                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.costs}</p>
+                    <p class="font-extrabold text-slate-600">${formatCurrency(totalCost)}</p>
+                  </div>
+                  <div>
+                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.profit}</p>
+                    <p class="font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatCurrency(profit)}</p>
+                  </div>
+                </div>
+                
+                <div class="flex gap-2">
+                  <button onclick="editOrder('${order.__backendId}')" 
+                    class="p-2.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                  </button>
+                  <button onclick="openDeleteModal('${order.__backendId}')" 
+                    class="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            ${order.notes ? `<p class="mt-4 pt-4 border-t-2 border-slate-100 text-sm text-slate-600 font-medium">${order.notes}</p>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    function filterOrders() {
+      const search = document.getElementById('search-orders').value.toLowerCase();
+      const statusFilter = document.getElementById('filter-status').value;
+      const profitFilter = document.getElementById('filter-profit').value;
+      
+      let filtered = allOrders.filter(order => {
+        const matchesSearch = !search || 
+          (order.order_id && order.order_id.toLowerCase().includes(search)) ||
+          (order.customer_name && order.customer_name.toLowerCase().includes(search));
+        
+        const matchesStatus = !statusFilter || order.status === statusFilter;
+        
+        const profit = calculateProfit(order);
+        const matchesProfit = !profitFilter ||
+          (profitFilter === 'profit' && profit >= 0) ||
+          (profitFilter === 'loss' && profit < 0);
+        
+        return matchesSearch && matchesStatus && matchesProfit;
+      });
+      
+      updateOrdersList(filtered);
+    }
+
+    // ============================================================================
+    // MODAL FUNCTIONS
+    // ============================================================================
+    function openOrderModal(order = null) {
+      if (!order) {
+        const monthOrders = getOrdersForMonth();
+        const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
+        const limit = PLAN_LIMITS[currentUser.plan] || 999;
+
+        if (activeOrders.length >= limit) {
+          showToast(`${EN.banners.limitReached} ${limit} ${EN.banners.ordersPerMonth} ${EN.banners.limitReachedSuffix}`, 'error');
+          showView('subscription');
+          return;
+        }
+      }
+
+      editingOrder = order;
+      
+      // Refresh modal
+      const existingModal = document.getElementById('order-modal');
+      if (existingModal) existingModal.remove();
+      document.getElementById('app').insertAdjacentHTML('beforeend', renderOrderModal());
+      
+      document.getElementById('modal-title').textContent = order ? EN.orderModal.editOrder : EN.orderModal.newOrder;
+      document.getElementById('order-form').reset();
+      
+      if (order) {
+        document.getElementById('order-backend-id').value = order.__backendId;
+        document.getElementById('order-id').value = order.order_id || '';
+        document.getElementById('order-date').value = order.order_date || '';
+        document.getElementById('customer-name').value = order.customer_name || '';
+        document.getElementById('product-name').value = order.product_name || '';
+        document.getElementById('order-status').value = order.status || 'pending';
+        document.getElementById('revenue').value = order.revenue || '';
+        document.getElementById('product-cost').value = order.product_cost || '';
+        document.getElementById('shipping-cost').value = order.shipping_cost || '';
+        document.getElementById('platform-fee').value = order.platform_fee || '';
+        document.getElementById('other-costs').value = order.other_costs || '';
+        document.getElementById('order-notes').value = order.notes || '';
+      } else {
+        document.getElementById('order-date').value = new Date().toISOString().split('T')[0];
+      }
+      
+      // Attach event listeners
+      ['revenue', 'product-cost', 'shipping-cost', 'platform-fee', 'other-costs'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateProfitPreview);
+      });
+      
+      updateProfitPreview();
+      document.getElementById('order-modal').classList.remove('hidden');
+    }
+
+    function closeOrderModal() {
+      document.getElementById('order-modal').classList.add('hidden');
+      editingOrder = null;
+    }
+
+    function editOrder(backendId) {
+      const order = allOrders.find(o => o.__backendId === backendId);
+      if (order) openOrderModal(order);
+    }
+
+    function openDeleteModal(backendId) {
+      deletingOrder = allOrders.find(o => o.__backendId === backendId);
+      if (deletingOrder) {
+        document.getElementById('delete-modal').classList.remove('hidden');
+      }
+    }
+
+    function closeDeleteModal() {
+      document.getElementById('delete-modal').classList.add('hidden');
+      deletingOrder = null;
+    }
+
+    async function confirmDelete() {
+      if (!deletingOrder) return;
+      
+      const btn = document.getElementById('confirm-delete-btn');
+      btn.disabled = true;
+      btn.textContent = EN.deleteModal.deleting;
+      
+      const result = await window.dataSdk.delete(deletingOrder);
+      
+      btn.disabled = false;
+      btn.textContent = EN.deleteModal.delete;
+      
+      if (result.isOk) {
+        showToast(EN.deleteModal.deleted, 'success');
+        closeDeleteModal();
+      } else {
+        showToast(EN.deleteModal.error, 'error');
+      }
+    }
+
+    function updateProfitPreview() {
+      const revenue = parseFloat(document.getElementById('revenue').value) || 0;
+      const productCost = parseFloat(document.getElementById('product-cost').value) || 0;
+      const shippingCost = parseFloat(document.getElementById('shipping-cost').value) || 0;
+      const platformFee = parseFloat(document.getElementById('platform-fee').value) || 0;
+      const otherCosts = parseFloat(document.getElementById('other-costs').value) || 0;
+      
+      const profit = revenue - productCost - shippingCost - platformFee - otherCosts;
+      
+      const previewEl = document.getElementById('preview-profit');
+      previewEl.textContent = formatCurrency(profit);
+      previewEl.className = `text-2xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}`;
+    }
+
+    async function handleOrderSubmit(e) {
+      e.preventDefault();
+      
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.textContent = EN.orderModal.saving;
+      
+      const orderData = {
+        type: 'order',
+        user_id: currentUser.__backendId,
+        order_id: document.getElementById('order-id').value,
+        order_date: document.getElementById('order-date').value,
+        customer_name: document.getElementById('customer-name').value,
+        product_name: document.getElementById('product-name').value,
+        revenue: parseFloat(document.getElementById('revenue').value) || 0,
+        product_cost: parseFloat(document.getElementById('product-cost').value) || 0,
+        shipping_cost: parseFloat(document.getElementById('shipping-cost').value) || 0,
+        platform_fee: parseFloat(document.getElementById('platform-fee').value) || 0,
+        other_costs: parseFloat(document.getElementById('other-costs').value) || 0,
+        status: document.getElementById('order-status').value,
+        notes: document.getElementById('order-notes').value,
+        created_at: editingOrder ? editingOrder.created_at : new Date().toISOString()
+      };
+      
+      let result;
+      if (editingOrder) {
+        result = await window.dataSdk.update({ ...orderData, __backendId: editingOrder.__backendId });
+      } else {
+        result = await window.dataSdk.create(orderData);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = EN.orderModal.save;
+      
+      if (result.isOk) {
+        showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, 'success');
+        closeOrderModal();
+      } else {
+        showToast(EN.orderModal.errorSaving, 'error');
+      }
+    }
+
+    // ============================================================================
+    // DATA HANDLER
+    // ============================================================================
+    const dataHandler = {
+      onDataChanged(data) {
+        allData = data;
+        
+        if (!currentUser) {
+          const storedUserId = localStorage.getItem('currentUserId');
+          if (storedUserId) {
+            const user = allData.find(u => u.__backendId === storedUserId);
+            if (user) {
+              currentUser = user;
+              render();
+              showMainApp();
+            }
+          }
+        } else {
+          const updatedUser = allData.find(u => u.__backendId === currentUser.__backendId);
+          if (updatedUser) {
+            currentUser = updatedUser;
+          }
+        }
+
+        if (currentUser) {
+          allOrders = allData.filter(item => item.type === 'order' && item.user_id === currentUser.__backendId);
+          updateDashboard();
+          filterOrders();
+        }
+      }
+    };
+
+    // ============================================================================
+    // CONFIG HANDLER
+    // ============================================================================
+    async function onConfigChange(config) {
+      const appTitle = config.app_title || defaultConfig.app_title;
+      const tagline = config.tagline || defaultConfig.tagline;
+      
+      const authTitle = document.getElementById('auth-title');
+      const authTagline = document.getElementById('auth-tagline');
+      const headerTitle = document.getElementById('header-title');
+      
+      if (authTitle) authTitle.textContent = appTitle;
+      if (authTagline) authTagline.textContent = tagline;
+      if (headerTitle) headerTitle.textContent = appTitle;
+      
+      document.title = `${appTitle} - ${tagline}`;
+    }
+
+    // ============================================================================
+    // RENDER
+    // ============================================================================
+    function render() {
+      const app = document.getElementById('app');
+      if (!currentUser) {
+        app.innerHTML = renderAuthScreen();
+      } else {
+        app.innerHTML = renderMainApp();
+        updateMonthDisplay();
+      }
+    }
+
+    // ============================================================================
+    // INITIALIZE
+    // ============================================================================
+    async function init() {
+      render();
+      
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange,
+          mapToCapabilities: (config) => ({
+            recolorables: [],
+            borderables: [],
+            fontEditable: undefined,
+            fontSizeable: undefined
+          }),
+          mapToEditPanelValues: (config) => new Map([
+            ['app_title', config.app_title || defaultConfig.app_title],
+            ['tagline', config.tagline || defaultConfig.tagline]
+          ])
+        });
+      }
+      
+      if (window.dataSdk) {
+        const result = await window.dataSdk.init(dataHandler);
+        if (!result.isOk) {
+          console.error('Failed to initialize Data SDK');
+        }
+      }
+    }
+
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c02ceb42657944f',t:'MTc2ODc4ODc0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
