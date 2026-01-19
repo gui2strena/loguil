@@ -1104,21 +1104,20 @@
         </div>
       `;
     }
+// ============================================================================
+// AUTH FUNCTIONS
+// ============================================================================
+function showLogin() {
+  document.getElementById('login-form').classList.remove('hidden');
+  document.getElementById('register-form').classList.add('hidden');
+}
 
-    // ============================================================================
-    // AUTH FUNCTIONS
-    // ============================================================================
-    function showLogin() {
-      document.getElementById('login-form').classList.remove('hidden');
-      document.getElementById('register-form').classList.add('hidden');
-    }
+function showRegister() {
+  document.getElementById('login-form').classList.add('hidden');
+  document.getElementById('register-form').classList.remove('hidden');
+}
 
-    function showRegister() {
-      document.getElementById('login-form').classList.add('hidden');
-      document.getElementById('register-form').classList.remove('hidden');
-    }
-
-  async function handleLogin(e) {
+async function handleLogin(e) {
   e.preventDefault();
 
   const email = document.getElementById('login-email').value.toLowerCase().trim();
@@ -1138,709 +1137,65 @@
       return;
     }
 
-    // Create a minimal user object so the UI can continue
+    // Minimal fields to avoid breaking banners/dashboard
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 14);
+
     currentUser = {
-      email: data.user.email,
-      plan: data.user.plan || "trial",
+      __backendId: "mock",
+      email: data.user?.email || email,
+      plan: data.user?.plan || "trial",
       store_name: "My Store",
       currency: "EUR",
-      __backendId: "mock"
+      trial_ends: trialEnd.toISOString(),
+      subscription_status: "active"
     };
 
     localStorage.setItem("currentUserId", "mock");
+
     showMainApp();
     showToast("Login successful!", "success");
-
   } catch (err) {
     showToast("Connection error. Please try again.", "error");
   }
 }
 
+async function handleRegister(e) {
+  e.preventDefault();
 
-    async function handleRegister(e) {
-      e.preventDefault();
-      const email = document.getElementById('register-email').value.toLowerCase().trim();
-      const password = document.getElementById('register-password').value;
-      const storeName = document.getElementById('store-name').value;
-      const currency = document.getElementById('store-currency').value;
+  const email = document.getElementById('register-email').value.toLowerCase().trim();
+  const password = document.getElementById('register-password').value;
+  const storeName = document.getElementById('store-name').value;
+  const currency = document.getElementById('store-currency').value;
 
-      const existingUser = allData.find(u => u.type === 'user' && u.email === email);
-      if (existingUser) {
-        showToast(EN.auth.emailExists, 'error');
-        return;
-      }
+  try {
+    const resp = await fetch("https://loguil-backend.onrender.com/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        storeName,
+        currency
+      })
+    });
 
-      const passwordHash = await hashPassword(password);
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 14);
+    const data = await resp.json();
 
-      const userData = {
-        type: 'user',
-        email: email,
-        password_hash: passwordHash,
-        store_name: storeName,
-        currency: currency,
-        plan: 'trial',
-        trial_ends: trialEnd.toISOString(),
-        subscription_status: 'active',
-        stripe_customer_id: '',
-        stripe_subscription_id: '',
-        created_at: new Date().toISOString()
-      };
+    if (!resp.ok) {
+      showToast(data.error || "Error creating account", "error");
+      return;
+    }
 
-     const resp = await fetch("https://loguil-backend.onrender.com/signup", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    email,
-    password,
-    storeName,
-    currency
-  })
-});
+    showToast("Account created! 14-day free trial 🎉", "success");
 
-const data = await resp.json();
+    setTimeout(() => {
+      document.getElementById('login-email').value = email;
+      document.getElementById('login-password').value = password;
+      showLogin();
+    }, 800);
 
-if (!resp.ok) {
-  showToast(data.error || "Error creating account", "error");
-  return;
+  } catch (err) {
+    showToast("Connection error. Please try again.", "error");
+  }
 }
-
-showToast("Account created! 14-day free trial 🎉", "success");
-
-setTimeout(() => {
-  document.getElementById('login-email').value = email;
-  document.getElementById('login-password').value = password;
-  showLogin();
-}, 800);
-
-      } else {
-        showToast('Error creating account', 'error');
-      }
-    }
-
-    function logout() {
-      currentUser = null;
-      localStorage.removeItem('currentUserId');
-      render();
-      showToast(EN.nav.logoutSuccess, 'info');
-    }
-
-    function showMainApp() {
-      render();
-      updateSubscriptionStatus();
-      updateDashboard();
-      showView('dashboard');
-    }
-
-    // ============================================================================
-    // SUBSCRIPTION MANAGEMENT
-    // ============================================================================
-    function updateSubscriptionStatus() {
-      const trialEnd = new Date(currentUser.trial_ends);
-      const now = new Date();
-      const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
-
-      if (currentUser.plan === 'trial' && daysLeft > 0) {
-        document.getElementById('trial-banner').classList.remove('hidden');
-        document.getElementById('trial-message').textContent = 
-          `${EN.banners.trialPrefix} ${daysLeft} ${EN.banners.trialDays}`;
-      } else {
-        document.getElementById('trial-banner').classList.add('hidden');
-      }
-
-      const monthOrders = getOrdersForMonth();
-      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
-      const limit = PLAN_LIMITS[currentUser.plan] || 999;
-
-      if (activeOrders.length >= limit * 0.9 && limit !== 999999) {
-        document.getElementById('limit-banner').classList.remove('hidden');
-        document.getElementById('limit-message').textContent = 
-          `${EN.banners.approachingLimit} ${currentUser.plan.toUpperCase()} ${EN.banners.plan} ${activeOrders.length}/${limit} ${EN.banners.trialDays}`;
-      } else {
-        document.getElementById('limit-banner').classList.add('hidden');
-      }
-
-      updateCurrentPlanDisplay();
-    }
-
-    function updateCurrentPlanDisplay() {
-      const planNames = {
-        trial: EN.subscription.freeTrial,
-        starter: EN.subscription.starter,
-        pro: EN.subscription.pro,
-        growth: EN.subscription.growth
-      };
-
-      const monthOrders = getOrdersForMonth();
-      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
-      const limit = PLAN_LIMITS[currentUser.plan];
-
-      document.getElementById('current-plan-name').textContent = planNames[currentUser.plan];
-      document.getElementById('usage-count').textContent = activeOrders.length;
-      
-      if (currentUser.plan === 'trial') {
-        const trialEnd = new Date(currentUser.trial_ends);
-        const daysLeft = Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24));
-        document.getElementById('current-plan-details').textContent = 
-          `${daysLeft} ${EN.subscription.daysRemaining} • ${EN.subscription.limit}: ${limit} ${EN.subscription.ordersPerMonth}`;
-      } else if (limit === 999999) {
-        document.getElementById('current-plan-details').textContent = EN.subscription.unlimitedOrders;
-      } else {
-        document.getElementById('current-plan-details').textContent = 
-          `${EN.subscription.limit}: ${limit} ${EN.subscription.ordersPerMonth}`;
-      }
-
-      document.getElementById('cancel-section').classList.toggle('hidden', 
-        currentUser.plan === 'trial');
-    }
-
-    async function subscribeToPlan(plan) {
-      showToast(EN.subscription.stripeInDev, 'info');
-      showToast(EN.subscription.prototypeNotice, 'info');
-      
-      const updatedUser = {
-        ...currentUser,
-        plan: plan,
-        subscription_status: 'active',
-        stripe_customer_id: 'demo_customer_id',
-        stripe_subscription_id: 'demo_subscription_id'
-      };
-
-      const result = await window.dataSdk.update(updatedUser);
-      if (result.isOk) {
-        showToast(`${plan.toUpperCase()} ${EN.subscription.planActivated}`, 'success');
-      }
-    }
-
-    async function cancelSubscription() {
-      const confirmation = document.createElement('div');
-      confirmation.innerHTML = `
-        <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px;">
-          <div style="background: white; border-radius: 24px; padding: 32px; max-width: 400px; text-align: center;">
-            <p style="font-size: 18px; font-weight: 600; color: #1e293b; margin-bottom: 16px;">${EN.subscription.confirmCancel}</p>
-            <p style="color: #64748b; margin-bottom: 24px;">${EN.subscription.confirmCancelDesc}</p>
-            <div style="display: flex; gap: 12px;">
-              <button onclick="this.closest('div').parentElement.remove()" style="flex: 1; padding: 12px; border: 2px solid #e2e8f0; border-radius: 12px; font-weight: 600; background: white;">${EN.subscription.no}</button>
-              <button onclick="confirmCancellation()" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border-radius: 12px; font-weight: 600; border: none;">${EN.subscription.yesCancel}</button>
-            </div>
-          </div>
-        </div>`;
-      document.body.appendChild(confirmation);
-    }
-
-    window.confirmCancellation = async function() {
-      document.querySelector('[onclick="confirmCancellation()"]').closest('div').parentElement.remove();
-      
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 7);
-
-      const updatedUser = {
-        ...currentUser,
-        plan: 'trial',
-        trial_ends: trialEnd.toISOString(),
-        subscription_status: 'cancelled',
-        stripe_subscription_id: ''
-      };
-
-      const result = await window.dataSdk.update(updatedUser);
-      if (result.isOk) {
-        showToast(EN.subscription.subscriptionCancelled, 'info');
-      }
-    };
-
-    // ============================================================================
-    // VIEW MANAGEMENT
-    // ============================================================================
-    function showView(view) {
-      document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
-      document.getElementById('view-orders').classList.toggle('hidden', view !== 'orders');
-      document.getElementById('view-subscription').classList.toggle('hidden', view !== 'subscription');
-      
-      document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.remove('gradient-primary', 'text-white', 'shadow-md');
-        btn.classList.add('text-slate-600', 'hover:bg-slate-100');
-      });
-      
-      const activeBtn = document.getElementById(`nav-${view}`);
-      activeBtn.classList.add('gradient-primary', 'text-white', 'shadow-md');
-      activeBtn.classList.remove('text-slate-600', 'hover:bg-slate-100');
-
-      if (view === 'subscription') {
-        updateCurrentPlanDisplay();
-      }
-    }
-
-    // ============================================================================
-    // MONTH NAVIGATION
-    // ============================================================================
-    function changeMonth(delta) {
-      currentMonth.setMonth(currentMonth.getMonth() + delta);
-      updateMonthDisplay();
-      updateDashboard();
-    }
-
-    function updateMonthDisplay() {
-      document.getElementById('current-month').textContent = 
-        `${MONTH_NAMES[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
-    }
-
-    function getOrdersForMonth() {
-      return allOrders.filter(order => {
-        if (!order.order_date) return false;
-        const orderDate = new Date(order.order_date + 'T00:00:00');
-        return orderDate.getMonth() === currentMonth.getMonth() &&
-               orderDate.getFullYear() === currentMonth.getFullYear();
-      });
-    }
-
-    // ============================================================================
-    // DASHBOARD UPDATE
-    // ============================================================================
-    function updateDashboard() {
-      const monthOrders = getOrdersForMonth();
-      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
-      
-      let totalRevenue = 0;
-      let totalCosts = 0;
-      
-      activeOrders.forEach(order => {
-        totalRevenue += parseFloat(order.revenue) || 0;
-        totalCosts += (parseFloat(order.product_cost) || 0) +
-                      (parseFloat(order.shipping_cost) || 0) +
-                      (parseFloat(order.platform_fee) || 0) +
-                      (parseFloat(order.other_costs) || 0);
-      });
-      
-      const profit = totalRevenue - totalCosts;
-      const margin = totalRevenue > 0 ? (profit / totalRevenue * 100) : 0;
-      const avgTicket = activeOrders.length > 0 ? totalRevenue / activeOrders.length : 0;
-      
-      document.getElementById('kpi-revenue').textContent = formatCurrency(totalRevenue);
-      document.getElementById('kpi-orders-count').textContent = `${activeOrders.length} ${EN.dashboard.ordersCount}`;
-      document.getElementById('kpi-costs').textContent = formatCurrency(totalCosts);
-      
-      const profitEl = document.getElementById('kpi-profit');
-      profitEl.textContent = formatCurrency(profit);
-      profitEl.className = `text-3xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'} mb-1`;
-      
-      const profitIcon = document.getElementById('kpi-profit-icon');
-      if (profit >= 0) {
-        profitIcon.className = 'w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center';
-        profitIcon.innerHTML = '<svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>';
-      } else {
-        profitIcon.className = 'w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center';
-        profitIcon.innerHTML = '<svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>';
-      }
-      
-      document.getElementById('kpi-margin').textContent = `${EN.dashboard.margin}: ${margin.toFixed(1)}%`;
-      document.getElementById('kpi-ticket').textContent = formatCurrency(avgTicket);
-      
-      const statusCounts = { pending: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 };
-      monthOrders.forEach(order => {
-        if (statusCounts.hasOwnProperty(order.status)) {
-          statusCounts[order.status]++;
-        }
-      });
-      
-      Object.keys(statusCounts).forEach(status => {
-        document.getElementById(`status-${status}`).textContent = statusCounts[status];
-      });
-      
-      updateRecentOrders();
-      updateSubscriptionStatus();
-    }
-
-    function updateRecentOrders() {
-      const container = document.getElementById('recent-orders');
-      const recentOrders = [...allOrders]
-        .sort((a, b) => new Date(b.order_date) - new Date(a.order_date))
-        .slice(0, 5);
-      
-      if (recentOrders.length === 0) {
-        container.innerHTML = `
-          <div class="p-12 text-center text-slate-500">
-            <svg class="w-16 h-16 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-            </svg>
-            <p class="font-semibold">${EN.dashboard.noOrders}</p>
-          </div>`;
-        return;
-      }
-      
-      container.innerHTML = recentOrders.map(order => {
-        const profit = calculateProfit(order);
-        return `
-          <div class="flex items-center justify-between p-5 hover:bg-slate-50 transition-colors">
-            <div class="flex items-center gap-4">
-              <div class="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center">
-                <span class="text-sm font-bold text-slate-600">#</span>
-              </div>
-              <div>
-                <p class="font-bold text-slate-900">${order.order_id || '-'}</p>
-                <p class="text-sm text-slate-500">${order.customer_name || EN.dashboard.customerNotProvided}</p>
-              </div>
-            </div>
-            <div class="text-right">
-              <p class="font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatCurrency(profit)}</p>
-              <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold status-${order.status}">
-                ${EN.status[order.status]}
-              </span>
-            </div>
-          </div>`;
-      }).join('');
-    }
-
-    // ============================================================================
-    // ORDERS LIST
-    // ============================================================================
-    function updateOrdersList(orders) {
-      const container = document.getElementById('orders-list');
-      
-      if (orders.length === 0) {
-        container.innerHTML = `
-          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-12 text-center text-slate-500">
-            <svg class="w-20 h-20 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-            <p class="text-lg font-bold mb-2">${EN.orders.noOrdersFound}</p>
-            <p class="text-sm">${EN.orders.tryAdjusting}</p>
-          </div>`;
-        return;
-      }
-      
-      container.innerHTML = orders.map(order => {
-        const profit = calculateProfit(order);
-        const totalCost = (parseFloat(order.product_cost) || 0) +
-                          (parseFloat(order.shipping_cost) || 0) +
-                          (parseFloat(order.platform_fee) || 0) +
-                          (parseFloat(order.other_costs) || 0);
-        
-        return `
-          <div class="bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-6 card-hover">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div class="flex items-start gap-4">
-                <div class="w-14 h-14 gradient-primary rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/30">
-                  <span class="text-xl font-extrabold text-white">#</span>
-                </div>
-                <div>
-                  <div class="flex flex-wrap items-center gap-2 mb-1">
-                    <h4 class="font-extrabold text-slate-900 text-lg">${order.order_id || '-'}</h4>
-                    <span class="px-3 py-1 rounded-full text-xs font-bold status-${order.status}">
-                      ${EN.status[order.status]}
-                    </span>
-                  </div>
-                  <p class="text-sm text-slate-600 font-semibold">${order.customer_name || EN.dashboard.customerNotProvided}</p>
-                  ${order.product_name ? `<p class="text-xs text-slate-500 mt-0.5 font-medium">📦 ${order.product_name}</p>` : ''}
-                  <p class="text-xs text-slate-400 mt-1 font-semibold">${formatDate(order.order_date)}</p>
-                </div>
-              </div>
-              
-              <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <div class="grid grid-cols-3 gap-4 text-center sm:text-right">
-                  <div>
-                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.sale}</p>
-                    <p class="font-extrabold text-slate-900">${formatCurrency(order.revenue)}</p>
-                  </div>
-                  <div>
-                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.costs}</p>
-                    <p class="font-extrabold text-slate-600">${formatCurrency(totalCost)}</p>
-                  </div>
-                  <div>
-                    <p class="text-xs text-slate-400 uppercase font-bold">${EN.orders.profit}</p>
-                    <p class="font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatCurrency(profit)}</p>
-                  </div>
-                </div>
-                
-                <div class="flex gap-2">
-                  <button onclick="editOrder('${order.__backendId}')" 
-                    class="p-2.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                    </svg>
-                  </button>
-                  <button onclick="openDeleteModal('${order.__backendId}')" 
-                    class="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            ${order.notes ? `<p class="mt-4 pt-4 border-t-2 border-slate-100 text-sm text-slate-600 font-medium">${order.notes}</p>` : ''}
-          </div>`;
-      }).join('');
-    }
-
-    function filterOrders() {
-      const search = document.getElementById('search-orders').value.toLowerCase();
-      const statusFilter = document.getElementById('filter-status').value;
-      const profitFilter = document.getElementById('filter-profit').value;
-      
-      let filtered = allOrders.filter(order => {
-        const matchesSearch = !search || 
-          (order.order_id && order.order_id.toLowerCase().includes(search)) ||
-          (order.customer_name && order.customer_name.toLowerCase().includes(search));
-        
-        const matchesStatus = !statusFilter || order.status === statusFilter;
-        
-        const profit = calculateProfit(order);
-        const matchesProfit = !profitFilter ||
-          (profitFilter === 'profit' && profit >= 0) ||
-          (profitFilter === 'loss' && profit < 0);
-        
-        return matchesSearch && matchesStatus && matchesProfit;
-      });
-      
-      updateOrdersList(filtered);
-    }
-
-    // ============================================================================
-    // MODAL FUNCTIONS
-    // ============================================================================
-    function openOrderModal(order = null) {
-      if (!order) {
-        const monthOrders = getOrdersForMonth();
-        const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
-        const limit = PLAN_LIMITS[currentUser.plan] || 999;
-
-        if (activeOrders.length >= limit) {
-          showToast(`${EN.banners.limitReached} ${limit} ${EN.banners.ordersPerMonth} ${EN.banners.limitReachedSuffix}`, 'error');
-          showView('subscription');
-          return;
-        }
-      }
-
-      editingOrder = order;
-      
-      // Refresh modal
-      const existingModal = document.getElementById('order-modal');
-      if (existingModal) existingModal.remove();
-      document.getElementById('app').insertAdjacentHTML('beforeend', renderOrderModal());
-      
-      document.getElementById('modal-title').textContent = order ? EN.orderModal.editOrder : EN.orderModal.newOrder;
-      document.getElementById('order-form').reset();
-      
-      if (order) {
-        document.getElementById('order-backend-id').value = order.__backendId;
-        document.getElementById('order-id').value = order.order_id || '';
-        document.getElementById('order-date').value = order.order_date || '';
-        document.getElementById('customer-name').value = order.customer_name || '';
-        document.getElementById('product-name').value = order.product_name || '';
-        document.getElementById('order-status').value = order.status || 'pending';
-        document.getElementById('revenue').value = order.revenue || '';
-        document.getElementById('product-cost').value = order.product_cost || '';
-        document.getElementById('shipping-cost').value = order.shipping_cost || '';
-        document.getElementById('platform-fee').value = order.platform_fee || '';
-        document.getElementById('other-costs').value = order.other_costs || '';
-        document.getElementById('order-notes').value = order.notes || '';
-      } else {
-        document.getElementById('order-date').value = new Date().toISOString().split('T')[0];
-      }
-      
-      // Attach event listeners
-      ['revenue', 'product-cost', 'shipping-cost', 'platform-fee', 'other-costs'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateProfitPreview);
-      });
-      
-      updateProfitPreview();
-      document.getElementById('order-modal').classList.remove('hidden');
-    }
-
-    function closeOrderModal() {
-      document.getElementById('order-modal').classList.add('hidden');
-      editingOrder = null;
-    }
-
-    function editOrder(backendId) {
-      const order = allOrders.find(o => o.__backendId === backendId);
-      if (order) openOrderModal(order);
-    }
-
-    function openDeleteModal(backendId) {
-      deletingOrder = allOrders.find(o => o.__backendId === backendId);
-      if (deletingOrder) {
-        document.getElementById('delete-modal').classList.remove('hidden');
-      }
-    }
-
-    function closeDeleteModal() {
-      document.getElementById('delete-modal').classList.add('hidden');
-      deletingOrder = null;
-    }
-
-    async function confirmDelete() {
-      if (!deletingOrder) return;
-      
-      const btn = document.getElementById('confirm-delete-btn');
-      btn.disabled = true;
-      btn.textContent = EN.deleteModal.deleting;
-      
-      const result = await window.dataSdk.delete(deletingOrder);
-      
-      btn.disabled = false;
-      btn.textContent = EN.deleteModal.delete;
-      
-      if (result.isOk) {
-        showToast(EN.deleteModal.deleted, 'success');
-        closeDeleteModal();
-      } else {
-        showToast(EN.deleteModal.error, 'error');
-      }
-    }
-
-    function updateProfitPreview() {
-      const revenue = parseFloat(document.getElementById('revenue').value) || 0;
-      const productCost = parseFloat(document.getElementById('product-cost').value) || 0;
-      const shippingCost = parseFloat(document.getElementById('shipping-cost').value) || 0;
-      const platformFee = parseFloat(document.getElementById('platform-fee').value) || 0;
-      const otherCosts = parseFloat(document.getElementById('other-costs').value) || 0;
-      
-      const profit = revenue - productCost - shippingCost - platformFee - otherCosts;
-      
-      const previewEl = document.getElementById('preview-profit');
-      previewEl.textContent = formatCurrency(profit);
-      previewEl.className = `text-2xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}`;
-    }
-
-    async function handleOrderSubmit(e) {
-      e.preventDefault();
-      
-      const btn = document.getElementById('submit-btn');
-      btn.disabled = true;
-      btn.textContent = EN.orderModal.saving;
-      
-      const orderData = {
-        type: 'order',
-        user_id: currentUser.__backendId,
-        order_id: document.getElementById('order-id').value,
-        order_date: document.getElementById('order-date').value,
-        customer_name: document.getElementById('customer-name').value,
-        product_name: document.getElementById('product-name').value,
-        revenue: parseFloat(document.getElementById('revenue').value) || 0,
-        product_cost: parseFloat(document.getElementById('product-cost').value) || 0,
-        shipping_cost: parseFloat(document.getElementById('shipping-cost').value) || 0,
-        platform_fee: parseFloat(document.getElementById('platform-fee').value) || 0,
-        other_costs: parseFloat(document.getElementById('other-costs').value) || 0,
-        status: document.getElementById('order-status').value,
-        notes: document.getElementById('order-notes').value,
-        created_at: editingOrder ? editingOrder.created_at : new Date().toISOString()
-      };
-      
-      let result;
-      if (editingOrder) {
-        result = await window.dataSdk.update({ ...orderData, __backendId: editingOrder.__backendId });
-      } else {
-        result = await window.dataSdk.create(orderData);
-      }
-      
-      btn.disabled = false;
-      btn.textContent = EN.orderModal.save;
-      
-      if (result.isOk) {
-        showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, 'success');
-        closeOrderModal();
-      } else {
-        showToast(EN.orderModal.errorSaving, 'error');
-      }
-    }
-
-    // ============================================================================
-    // DATA HANDLER
-    // ============================================================================
-    const dataHandler = {
-      onDataChanged(data) {
-        allData = data;
-        
-        if (!currentUser) {
-          const storedUserId = localStorage.getItem('currentUserId');
-          if (storedUserId) {
-            const user = allData.find(u => u.__backendId === storedUserId);
-            if (user) {
-              currentUser = user;
-              render();
-              showMainApp();
-            }
-          }
-        } else {
-          const updatedUser = allData.find(u => u.__backendId === currentUser.__backendId);
-          if (updatedUser) {
-            currentUser = updatedUser;
-          }
-        }
-
-        if (currentUser) {
-          allOrders = allData.filter(item => item.type === 'order' && item.user_id === currentUser.__backendId);
-          updateDashboard();
-          filterOrders();
-        }
-      }
-    };
-
-    // ============================================================================
-    // CONFIG HANDLER
-    // ============================================================================
-    async function onConfigChange(config) {
-      const appTitle = config.app_title || defaultConfig.app_title;
-      const tagline = config.tagline || defaultConfig.tagline;
-      
-      const authTitle = document.getElementById('auth-title');
-      const authTagline = document.getElementById('auth-tagline');
-      const headerTitle = document.getElementById('header-title');
-      
-      if (authTitle) authTitle.textContent = appTitle;
-      if (authTagline) authTagline.textContent = tagline;
-      if (headerTitle) headerTitle.textContent = appTitle;
-      
-      document.title = `${appTitle} - ${tagline}`;
-    }
-
-    // ============================================================================
-    // RENDER
-    // ============================================================================
-    function render() {
-      const app = document.getElementById('app');
-      if (!currentUser) {
-        app.innerHTML = renderAuthScreen();
-      } else {
-        app.innerHTML = renderMainApp();
-        updateMonthDisplay();
-      }
-    }
-
-    // ============================================================================
-    // INITIALIZE
-    // ============================================================================
-    async function init() {
-      render();
-      
-      if (window.elementSdk) {
-        window.elementSdk.init({
-          defaultConfig,
-          onConfigChange,
-          mapToCapabilities: (config) => ({
-            recolorables: [],
-            borderables: [],
-            fontEditable: undefined,
-            fontSizeable: undefined
-          }),
-          mapToEditPanelValues: (config) => new Map([
-            ['app_title', config.app_title || defaultConfig.app_title],
-            ['tagline', config.tagline || defaultConfig.tagline]
-          ])
-        });
-      }
-      
-      if (window.dataSdk) {
-        const result = await window.dataSdk.init(dataHandler);
-        if (!result.isOk) {
-          console.error('Failed to initialize Data SDK');
-        }
-      }
-    }
-
-    init();
-  </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c02ceb42657944f',t:'MTc2ODc4ODc0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
-</html>
