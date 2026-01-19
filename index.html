@@ -1173,15 +1173,32 @@
         created_at: new Date().toISOString()
       };
 
-      const result = await window.dataSdk.create(userData);
-      
-      if (result.isOk) {
-        showToast(EN.auth.accountCreatedEmoji, 'success');
-        setTimeout(() => {
-          document.getElementById('login-email').value = email;
-          document.getElementById('login-password').value = password;
-          showLogin();
-        }, 1500);
+     const resp = await fetch("https://loguil-backend.onrender.com/signup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    email,
+    password,
+    storeName,
+    currency
+  })
+});
+
+const data = await resp.json();
+
+if (!resp.ok) {
+  showToast(data.error || "Error creating account", "error");
+  return;
+}
+
+showToast("Account created! 14-day free trial 🎉", "success");
+
+setTimeout(() => {
+  document.getElementById('login-email').value = email;
+  document.getElementById('login-password').value = password;
+  showLogin();
+}, 800);
+
       } else {
         showToast('Error creating account', 'error');
       }
