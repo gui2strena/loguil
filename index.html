@@ -1163,50 +1163,44 @@
   }
 }
 
-    async function handleRegister(e) {
-      e.preventDefault();
-      const email = document.getElementById('register-email').value.toLowerCase().trim();
-      const password = document.getElementById('register-password').value;
-      const storeName = document.getElementById('store-name').value;
-      const currency = document.getElementById('store-currency').value;
+async function handleRegister(e) {
+  e.preventDefault();
 
-      const existingUser = allData.find(u => u.type === 'user' && u.email === email);
-      if (existingUser) {
-        showToast(EN.auth.emailExists, 'error');
-        return;
-      }
+  const email = document.getElementById('register-email').value.toLowerCase().trim();
+  const password = document.getElementById('register-password').value;
+  const storeName = document.getElementById('store-name').value;
+  const currency = document.getElementById('store-currency').value;
 
-      const passwordHash = await hashPassword(password);
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 14);
+  try {
+    const resp = await fetch("https://loguil-backend.onrender.com/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, storeName, currency })
+    });
 
-      const userData = {
-        type: 'user',
-        email: email,
-        password_hash: passwordHash,
-        store_name: storeName,
-        currency: currency,
-        plan: 'trial',
-        trial_ends: trialEnd.toISOString(),
-        subscription_status: 'active',
-        stripe_customer_id: '',
-        stripe_subscription_id: '',
-        created_at: new Date().toISOString()
-      };
+    const data = await resp.json();
 
-      const result = await window.dataSdk.create(userData);
-      
-      if (result.isOk) {
-        showToast(EN.auth.accountCreatedEmoji, 'success');
-        setTimeout(() => {
-          document.getElementById('login-email').value = email;
-          document.getElementById('login-password').value = password;
-          showLogin();
-        }, 1500);
-      } else {
-        showToast('Error creating account', 'error');
-      }
+    if (!resp.ok) {
+      showToast(data.error || "Error creating account", "error");
+      return;
     }
+
+    // Keep store settings locally so the UI remains consistent immediately after login
+    localStorage.setItem("pendingStoreName", storeName);
+    localStorage.setItem("pendingCurrency", currency);
+
+    showToast("Account created! 14-day free trial 🎉", "success");
+
+    setTimeout(() => {
+      document.getElementById('login-email').value = email;
+      document.getElementById('login-password').value = password;
+      showLogin();
+    }, 800);
+
+  } catch (err) {
+    showToast("Connection error. Please try again.", "error");
+  }
+}
 
     function logout() {
       currentUser = null;
