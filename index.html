@@ -1158,6 +1158,9 @@ currency: currentUser?.currency || localStorage.getItem("pendingCurrency") || "E
     localStorage.setItem('currentUserId', currentUser.__backendId);
     showMainApp();
     showToast("Login successful!", "success");
+    localStorage.removeItem("pendingStoreName");
+    localStorage.removeItem("pendingCurrency");
+
 
   } catch (err) {
     showToast("Connection error. Please try again.", "error");
