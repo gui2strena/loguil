@@ -1118,29 +1118,50 @@
       document.getElementById('register-form').classList.remove('hidden');
     }
 
-    async function handleLogin(e) {
-      e.preventDefault();
-      const email = document.getElementById('login-email').value.toLowerCase().trim();
-      const password = document.getElementById('login-password').value;
+   async function handleLogin(e) {
+  e.preventDefault();
 
-      const user = allData.find(u => u.type === 'user' && u.email === email);
-      
-      if (!user) {
-        showToast(EN.auth.userNotFound, 'error');
-        return;
-      }
+  const email = document.getElementById('login-email').value.toLowerCase().trim();
+  const password = document.getElementById('login-password').value;
 
-      const validPassword = await verifyPassword(password, user.password_hash);
-      if (!validPassword) {
-        showToast(EN.auth.incorrectPassword, 'error');
-        return;
-      }
+  try {
+    const resp = await fetch("https://loguil-backend.onrender.com/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
 
-      currentUser = user;
-      localStorage.setItem('currentUserId', user.__backendId);
-      showMainApp();
-      showToast(EN.auth.loginSuccess, 'success');
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      showToast(data.error || "Login failed", "error");
+      return;
     }
+
+    // Keep the app stable: preserve store_name/currency if they exist,
+    // otherwise provide safe defaults so dashboard/banners don't crash.
+    const fallbackTrialEnd = new Date();
+    fallbackTrialEnd.setDate(fallbackTrialEnd.getDate() + 14);
+
+    currentUser = {
+      ...(currentUser || {}),
+      __backendId: (currentUser && currentUser.__backendId) ? currentUser.__backendId : "mock",
+      email: data.user?.email || email,
+      plan: data.user?.plan || (currentUser?.plan || "trial"),
+      store_name: currentUser?.store_name || "My Store",
+      currency: currentUser?.currency || "EUR",
+      trial_ends: currentUser?.trial_ends || fallbackTrialEnd.toISOString(),
+      subscription_status: currentUser?.subscription_status || "active"
+    };
+
+    localStorage.setItem('currentUserId', currentUser.__backendId);
+    showMainApp();
+    showToast("Login successful!", "success");
+
+  } catch (err) {
+    showToast("Connection error. Please try again.", "error");
+  }
+}
 
     async function handleRegister(e) {
       e.preventDefault();
