@@ -1148,8 +1148,9 @@
       __backendId: (currentUser && currentUser.__backendId) ? currentUser.__backendId : "mock",
       email: data.user?.email || email,
       plan: data.user?.plan || (currentUser?.plan || "trial"),
-      store_name: currentUser?.store_name || "My Store",
-      currency: currentUser?.currency || "EUR",
+store_name: currentUser?.store_name || localStorage.getItem("pendingStoreName") || "My Store",
+currency: currentUser?.currency || localStorage.getItem("pendingCurrency") || "EUR",
+     
       trial_ends: currentUser?.trial_ends || fallbackTrialEnd.toISOString(),
       subscription_status: currentUser?.subscription_status || "active"
     };
