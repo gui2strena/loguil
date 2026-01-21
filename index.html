@@ -415,6 +415,46 @@
     async function verifyPassword(password, hash) {
       return btoa(password) === hash;
     }
+// ============================================================================
+// API HELPERS (Backend Orders)
+// ============================================================================
+const API_BASE = "https://loguil-backend.onrender.com";
+
+async function api(path, options = {}) {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+
+  let data = {};
+  try { data = await resp.json(); } catch {}
+  if (!resp.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+async function loadOrdersFromBackend() {
+  if (!currentUser?.__backendId) return;
+
+  const data = await api(`/orders?userId=${encodeURIComponent(currentUser.__backendId)}`);
+
+  allOrders = (data.orders || []).map(o => ({
+    __backendId: String(o.id),
+    type: "order",
+    user_id: String(o.user_id),
+    order_id: o.order_id || "",
+    order_date: o.order_date ? String(o.order_date).slice(0,10) : "",
+    customer_name: o.customer_name || "",
+    product_name: o.product_name || "",
+    revenue: Number(o.revenue || 0),
+    product_cost: Number(o.product_cost || 0),
+    shipping_cost: Number(o.shipping_cost || 0),
+    platform_fee: Number(o.platform_fee || 0),
+    other_costs: Number(o.other_costs || 0),
+    status: o.status || "pending",
+    notes: o.notes || "",
+    created_at: o.created_at || new Date().toISOString()
+  }));
+}
 
     // ============================================================================
     // RENDERING FUNCTIONS
