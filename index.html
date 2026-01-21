@@ -1197,11 +1197,23 @@ async function handleLogin(e) {
     localStorage.removeItem("pendingCurrency");
 
     showMainApp();
-    showToast("Login successful!", "success");
-  } catch (err) {
-    showToast("Connection error. Please try again.", "error");
-  }
+showToast("Login successful!", "success");
+
+// Load orders from backend and refresh UI
+loadOrdersFromBackend()
+  .then(() => {
+    updateDashboard();
+    filterOrders();
+  })
+  .catch(() => {
+    showToast("Could not load orders. Please refresh.", "info");
+  });
+
+} catch (err) {
+  showToast("Connection error. Please try again.", "error");
 }
+}
+
 
 
 
