@@ -1118,7 +1118,7 @@
       document.getElementById('register-form').classList.remove('hidden');
     }
 
- async function handleLogin(e) {
+async function handleLogin(e) {
   e.preventDefault();
 
   const email = document.getElementById('login-email').value.toLowerCase().trim();
@@ -1138,23 +1138,21 @@
       return;
     }
 
-    // Use REAL user data from backend
     const backendUser = data.user;
 
+    const fallbackTrialEnd = new Date(Date.now() + 14 * 86400000).toISOString();
+
     currentUser = {
-      __backendId: String(backendUser.id),      // keep compatible with your UI
+      __backendId: String(backendUser.id),
       email: backendUser.email,
-      store_name: backendUser.store_name,
-      currency: backendUser.currency,
+      store_name: backendUser.store_name || localStorage.getItem("pendingStoreName") || "My Store",
+      currency: backendUser.currency || localStorage.getItem("pendingCurrency") || "EUR",
       plan: backendUser.plan || "trial",
-      trial_ends: backendUser.trial_ends || new Date(Date.now() + 14 * 86400000).toISOString(),
-      subscription_status: "active"
+      trial_ends: backendUser.trial_ends || fallbackTrialEnd,
+      subscription_status: backendUser.subscription_status || "active"
     };
 
-    // persist session
     localStorage.setItem("currentUserId", currentUser.__backendId);
-
-    // cleanup any old pending values
     localStorage.removeItem("pendingStoreName");
     localStorage.removeItem("pendingCurrency");
 
@@ -1165,34 +1163,7 @@
   }
 }
 
-    // Keep the app stable: preserve store_name/currency if they exist,
-    // otherwise provide safe defaults so dashboard/banners don't crash.
-    const fallbackTrialEnd = new Date();
-    fallbackTrialEnd.setDate(fallbackTrialEnd.getDate() + 14);
 
-    currentUser = {
-      ...(currentUser || {}),
-      __backendId: (currentUser && currentUser.__backendId) ? currentUser.__backendId : "mock",
-      email: data.user?.email || email,
-      plan: data.user?.plan || (currentUser?.plan || "trial"),
-store_name: currentUser?.store_name || localStorage.getItem("pendingStoreName") || "My Store",
-currency: currentUser?.currency || localStorage.getItem("pendingCurrency") || "EUR",
-     
-      trial_ends: currentUser?.trial_ends || fallbackTrialEnd.toISOString(),
-      subscription_status: currentUser?.subscription_status || "active"
-    };
-
-    localStorage.setItem('currentUserId', currentUser.__backendId);
-    showMainApp();
-    showToast("Login successful!", "success");
-    localStorage.removeItem("pendingStoreName");
-    localStorage.removeItem("pendingCurrency");
-
-
-  } catch (err) {
-    showToast("Connection error. Please try again.", "error");
-  }
-}
 
 async function handleRegister(e) {
   e.preventDefault();
