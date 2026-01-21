@@ -1118,7 +1118,7 @@
       document.getElementById('register-form').classList.remove('hidden');
     }
 
-   async function handleLogin(e) {
+ async function handleLogin(e) {
   e.preventDefault();
 
   const email = document.getElementById('login-email').value.toLowerCase().trim();
@@ -1137,6 +1137,33 @@
       showToast(data.error || "Login failed", "error");
       return;
     }
+
+    // Use REAL user data from backend
+    const backendUser = data.user;
+
+    currentUser = {
+      __backendId: String(backendUser.id),      // keep compatible with your UI
+      email: backendUser.email,
+      store_name: backendUser.store_name,
+      currency: backendUser.currency,
+      plan: backendUser.plan || "trial",
+      trial_ends: backendUser.trial_ends || new Date(Date.now() + 14 * 86400000).toISOString(),
+      subscription_status: "active"
+    };
+
+    // persist session
+    localStorage.setItem("currentUserId", currentUser.__backendId);
+
+    // cleanup any old pending values
+    localStorage.removeItem("pendingStoreName");
+    localStorage.removeItem("pendingCurrency");
+
+    showMainApp();
+    showToast("Login successful!", "success");
+  } catch (err) {
+    showToast("Connection error. Please try again.", "error");
+  }
+}
 
     // Keep the app stable: preserve store_name/currency if they exist,
     // otherwise provide safe defaults so dashboard/banners don't crash.
