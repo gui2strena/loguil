@@ -1766,36 +1766,36 @@ async function handleRegister(e) {
   };
 
   try {
-  const payload = {
-    ...orderData,
-    userId: currentUser.__backendId  // ✅ o backend quer isto
-  };
+    // ✅ backend espera userId
+    const payload = { ...orderData, userId: currentUser.__backendId };
 
-  if (editingOrder) {
-    await api(`/orders/${encodeURIComponent(editingOrder.__backendId)}`, {
-      method: "PUT",
-      body: JSON.stringify(payload)
-    });
-  } else {
-    await api(`/orders`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    if (editingOrder) {
+      await api(`/orders/${encodeURIComponent(editingOrder.__backendId)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      await api(`/orders`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    }
+
+    await loadOrdersFromBackend();
+    updateDashboard();
+    filterOrders();
+
+    showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, "success");
+    closeOrderModal();
+
+  } catch (err) {
+    showToast(err.message || EN.orderModal.errorSaving, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = EN.orderModal.save;
   }
-
-  await loadOrdersFromBackend();
-  updateDashboard();
-  filterOrders();
-
-  showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, "success");
-  closeOrderModal();
-
-} catch (err) {
-  showToast(err.message || EN.orderModal.errorSaving, "error");
-} finally {
-  btn.disabled = false;
-  btn.textContent = EN.orderModal.save;
 }
+
 
     // ============================================================================
     // DATA HANDLER
