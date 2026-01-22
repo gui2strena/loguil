@@ -1741,47 +1741,56 @@ async function handleRegister(e) {
       previewEl.className = `text-2xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}`;
     }
 
-    async function handleOrderSubmit(e) {
-      e.preventDefault();
-      
-      const btn = document.getElementById('submit-btn');
-      btn.disabled = true;
-      btn.textContent = EN.orderModal.saving;
-      
-      const orderData = {
-        type: 'order',
-        user_id: currentUser.__backendId,
-        order_id: document.getElementById('order-id').value,
-        order_date: document.getElementById('order-date').value,
-        customer_name: document.getElementById('customer-name').value,
-        product_name: document.getElementById('product-name').value,
-        revenue: parseFloat(document.getElementById('revenue').value) || 0,
-        product_cost: parseFloat(document.getElementById('product-cost').value) || 0,
-        shipping_cost: parseFloat(document.getElementById('shipping-cost').value) || 0,
-        platform_fee: parseFloat(document.getElementById('platform-fee').value) || 0,
-        other_costs: parseFloat(document.getElementById('other-costs').value) || 0,
-        status: document.getElementById('order-status').value,
-        notes: document.getElementById('order-notes').value,
-        created_at: editingOrder ? editingOrder.created_at : new Date().toISOString()
-      };
-      
-      let result;
-      if (editingOrder) {
-        result = await window.dataSdk.update({ ...orderData, __backendId: editingOrder.__backendId });
-      } else {
-        result = await window.dataSdk.create(orderData);
-      }
-      
-      btn.disabled = false;
-      btn.textContent = EN.orderModal.save;
-      
-      if (result.isOk) {
-        showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, 'success');
-        closeOrderModal();
-      } else {
-        showToast(EN.orderModal.errorSaving, 'error');
-      }
+   async function handleOrderSubmit(e) {
+  e.preventDefault();
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = EN.orderModal.saving;
+
+  const orderData = {
+    type: 'order',
+    user_id: currentUser.__backendId,
+    order_id: document.getElementById('order-id').value,
+    order_date: document.getElementById('order-date').value,
+    customer_name: document.getElementById('customer-name').value,
+    product_name: document.getElementById('product-name').value,
+    revenue: parseFloat(document.getElementById('revenue').value) || 0,
+    product_cost: parseFloat(document.getElementById('product-cost').value) || 0,
+    shipping_cost: parseFloat(document.getElementById('shipping-cost').value) || 0,
+    platform_fee: parseFloat(document.getElementById('platform-fee').value) || 0,
+    other_costs: parseFloat(document.getElementById('other-costs').value) || 0,
+    status: document.getElementById('order-status').value,
+    notes: document.getElementById('order-notes').value,
+    created_at: editingOrder ? editingOrder.created_at : new Date().toISOString()
+  };
+
+  try {
+    if (editingOrder) {
+      await api(`/orders/${encodeURIComponent(editingOrder.__backendId)}`, {
+        method: "PUT",
+        body: JSON.stringify(orderData)
+      });
+    } else {
+      await api(`/orders`, {
+        method: "POST",
+        body: JSON.stringify(orderData)
+      });
     }
+
+    await loadOrdersFromBackend();
+    updateDashboard();
+    filterOrders();
+
+    showToast(editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated, "success");
+    closeOrderModal();
+  } catch (err) {
+    showToast(err.message || EN.orderModal.errorSaving, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = EN.orderModal.save;
+  }
+}
 
     // ============================================================================
     // DATA HANDLER
