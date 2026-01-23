@@ -206,6 +206,42 @@ app.post("/orders", async (req, res) => {
     const uid = Number(userId);
     if (!uid || !order) return res.status(400).json({ error: "Missing userId/order" });
 
+    // --- enforce monthly limits by plan ---
+const userRes = await pool.query(
+  "SELECT plan FROM users WHERE id = $1",
+  [user_id]
+);
+
+if (userRes.rowCount === 0) {
+  return res.status(404).json({ error: "User not found" });
+}
+
+const plan = userRes.rows[0].plan || "trial";
+const limit = PLAN_LIMITS[plan] ?? 999;
+
+if (limit !== 999999) {
+  const { start, end } = monthRangeUTC();
+
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS count
+     FROM orders
+     WHERE user_id = $1
+       AND created_at >= $2
+       AND created_at < $3`,
+    [user_id, start.toISOString(), end.toISOString()]
+  );
+
+  const used = countRes.rows[0].count;
+
+  if (used >= limit) {
+    return res.status(403).json({
+      error: `Plan limit reached (${used}/${limit} orders this month). Please upgrade.`
+    });
+  }
+}
+// --- end enforce ---
+
+
     const created = await pool.query(
       `INSERT INTO orders (
         user_id, order_id, order_date, customer_name, product_name,
