@@ -1708,24 +1708,31 @@ async function handleRegister(e) {
     }
 
     async function confirmDelete() {
-      if (!deletingOrder) return;
-      
-      const btn = document.getElementById('confirm-delete-btn');
-      btn.disabled = true;
-      btn.textContent = EN.deleteModal.deleting;
-      
-      const result = await window.dataSdk.delete(deletingOrder);
-      
-      btn.disabled = false;
-      btn.textContent = EN.deleteModal.delete;
-      
-      if (result.isOk) {
-        showToast(EN.deleteModal.deleted, 'success');
-        closeDeleteModal();
-      } else {
-        showToast(EN.deleteModal.error, 'error');
-      }
-    }
+  if (!deletingOrder) return;
+
+  const btn = document.getElementById('confirm-delete-btn');
+  btn.disabled = true;
+  btn.textContent = EN.deleteModal.deleting;
+
+  try {
+    await api(`/orders/${encodeURIComponent(deletingOrder.__backendId)}`, {
+      method: "DELETE"
+    });
+
+    await loadOrdersFromBackend();
+    updateDashboard();
+    filterOrders();
+
+    showToast(EN.deleteModal.deleted, "success");
+    closeDeleteModal();
+
+  } catch (err) {
+    showToast(err.message || EN.deleteModal.error, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = EN.deleteModal.delete;
+  }
+}
 
     function updateProfitPreview() {
       const revenue = parseFloat(document.getElementById('revenue').value) || 0;
