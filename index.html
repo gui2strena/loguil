@@ -1710,14 +1710,20 @@ async function handleRegister(e) {
     async function confirmDelete() {
   if (!deletingOrder) return;
 
+     if (!currentUser?.__backendId) {
+  showToast("Missing UserId", "error");
+  return;
+}
+
   const btn = document.getElementById('confirm-delete-btn');
   btn.disabled = true;
   btn.textContent = EN.deleteModal.deleting;
 
   try {
-    await api(`/orders/${encodeURIComponent(deletingOrder.__backendId)}`, {
-      method: "DELETE"
-    });
+    await api(`/orders/${encodeURIComponent(deletingOrder.__backendId)}?userId=${encodeURIComponent(currentUser.__backendId)}`, {
+  method: "DELETE"
+});
+
 
     await loadOrdersFromBackend();
     updateDashboard();
