@@ -7,6 +7,24 @@ const bcrypt = require("bcryptjs");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// =========================
+// PLAN LIMITS (server-side)
+// =========================
+const PLAN_LIMITS = {
+  trial: 999,
+  starter: 100,
+  pro: 1000,
+  growth: 999999
+};
+
+// helper: current month range in UTC
+function monthRangeUTC() {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
+  return { start, end };
+}
+
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "*";
 app.use(
   cors({
