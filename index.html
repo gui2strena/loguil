@@ -1716,9 +1716,10 @@ async function handleRegister(e) {
 
   try {
     // IMPORTANT: delete by order id (backend id), no need to send userId
-    await api(`/orders/${encodeURIComponent(deletingOrder.__backendId)}`, {
-      method: "DELETE"
-    });
+    await api(
+  `/orders/${encodeURIComponent(deletingOrder.__backendId)}?userId=${encodeURIComponent(currentUser.__backendId)}`,
+  { method: "DELETE" }
+);
 
     await loadOrdersFromBackend();
     updateDashboard();
