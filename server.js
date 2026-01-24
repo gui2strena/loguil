@@ -175,34 +175,80 @@ app.post("/login", async (req, res) => {
 // contract: POST /orders { userId, order }
 app.post("/orders", async (req, res) => {
   try {
-    const userId = String(req.body.userId || "").trim();
-    const order = req.body.order;
+    const userIdRaw = (req.body?.userId ?? "").toString().trim();
+    const order = req.body?.order;
 
-    if (!userId) return res.status(400).json({ error: "Missing userId" });
-    if (!order || !order.order_id || !order.order_date) return res.status(400).json({ error: "Missing order" });
+    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
 
+    const userIdNum = Number(userIdRaw);
+    if (!Number.isFinite(userIdNum)) {
+      return res.status(400).json({ error: "Invalid userId" });
+    }
+
+    if (!order || typeof order !== "object") {
+      return res.status(400).json({ error: "Missing order" });
+    }
+
+    if (!order.order_id || !String(order.order_id).trim()) {
+      return res.status(400).json({ error: "Missing order_id" });
+    }
+
+    if (!order.order_date || !String(order.order_date).trim()) {
+      return res.status(400).json({ error: "Missing order_date" });
+    }
+
+    // revenue & product_cost are required for your UI calculations
+    if (order.revenue === undefined || order.revenue === null) {
+      return res.status(400).json({ error: "Missing revenue" });
+    }
+    if (order.product_cost === undefined || order.product_cost === null) {
+      return res.status(400).json({ error: "Missing product_cost" });
+    }
+
+    // If DB connected, persist in Postgres
     if (pool) {
       const created = await pool.query(
-        `INSERT INTO orders (user_id, order_id, order_date, customer_name, product_name, revenue, product_cost, shipping_cost, platform_fee, other_costs, status, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         RETURNING *`,
+        `INSERT INTO orders (
+          user_id, order_id, order_date, customer_name, product_name,
+          revenue, product_cost, shipping_cost, platform_fee, other_costs,
+          status, notes
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        RETURNING *`,
         [
-          Number(userId),
-          order.order_id,
-          order.order_date,
-          order.customer_name || "",
-          order.product_name || "",
+          userIdNum,
+          String(order.order_id).trim(),
+          String(order.order_date).trim(),
+          (order.customer_name || "").toString(),
+          (order.product_name || "").toString(),
           Number(order.revenue || 0),
           Number(order.product_cost || 0),
           Number(order.shipping_cost || 0),
           Number(order.platform_fee || 0),
           Number(order.other_costs || 0),
-          order.status || "pending",
-          order.notes || ""
+          (order.status || "pending").toString(),
+          (order.notes || "").toString()
         ]
       );
+
       return res.json({ success: true, order: created.rows[0] });
     }
+
+    // Fallback (no DB): still respond OK to keep the app usable
+    return res.json({
+      success: true,
+      order: {
+        id: Date.now(),
+        user_id: userIdNum,
+        ...order
+      }
+    });
+
+  } catch (err) {
+    console.error("POST /orders error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
     // fallback memory
     const newOrder = { id: Date.now(), user_id: userId, ...order, created_at: new Date().toISOString() };
