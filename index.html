@@ -428,7 +428,17 @@ async function api(path, options = {}) {
 
   let data = {};
   try { data = await resp.json(); } catch {}
-  if (!resp.ok) throw new Error(data.error || "Request failed");
+
+  if (!resp.ok) {
+    // Mostra exatamente o erro que vem do backend
+    const msg =
+      data?.error ||
+      data?.message ||
+      (typeof data === "string" ? data : "") ||
+      `Request failed (${resp.status})`;
+    throw new Error(msg);
+  }
+
   return data;
 }
 
