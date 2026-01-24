@@ -1803,11 +1803,11 @@ async function handleRegister(e) {
   closeOrderModal();
 
 } catch (err) {
-  showToast(err.message || EN.orderModal.errorSaving, "error");
+  showToast(err.message || "Failed to create order", "error");
 } finally {
   btn.disabled = false;
   btn.textContent = EN.orderModal.save;
- }
+}
 }
     
 
