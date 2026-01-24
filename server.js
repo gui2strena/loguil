@@ -6,7 +6,7 @@ const bcrypt = require("bcryptjs");
 let Pool;
 try {
   ({ Pool } = require("pg"));
-} catch {}
+} catch { /* pg optional */ }
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -31,7 +31,7 @@ const pool = hasDb
 // fallback memory (if DB missing)
 const mem = {
   users: [], // {id,email,password_hash,store_name,currency,plan,trial_ends}
-  orders: [], // {id,user_id,...}
+  orders: [], // {id,user_id,...,created_at}
 };
 
 async function ensureTables() {
@@ -84,7 +84,7 @@ app.get("/debug", async (req, res) => {
       return res.json({
         status: "ok",
         app: "Loguil",
-        db: "not_connected",
+        db: "disabled",
         users: mem.users.length,
         orders: mem.orders.length,
       });
@@ -126,8 +126,9 @@ app.post("/signup", async (req, res) => {
       const existing = await pool.query("SELECT id FROM users WHERE email=$1", [
         emailNorm,
       ]);
-      if (existing.rows.length)
+      if (existing.rows.length) {
         return res.status(400).json({ error: "Email already registered" });
+      }
 
       const created = await pool.query(
         `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends)
@@ -156,7 +157,6 @@ app.post("/signup", async (req, res) => {
 
     const safe = { ...user };
     delete safe.password_hash;
-
     return res.json({ success: true, user: safe });
   } catch (err) {
     console.error("POST /signup error:", err);
@@ -197,7 +197,6 @@ app.post("/login", async (req, res) => {
 
     const safe = { ...user };
     delete safe.password_hash;
-
     return res.json({ success: true, user: safe });
   } catch (err) {
     console.error("POST /login error:", err);
@@ -229,14 +228,6 @@ app.post("/orders", async (req, res) => {
 
     if (!order.order_date || !String(order.order_date).trim()) {
       return res.status(400).json({ error: "Missing order_date" });
-    }
-
-    // revenue & product_cost are required for your UI calculations
-    if (order.revenue === undefined || order.revenue === null) {
-      return res.status(400).json({ error: "Missing revenue" });
-    }
-    if (order.product_cost === undefined || order.product_cost === null) {
-      return res.status(400).json({ error: "Missing product_cost" });
     }
 
     if (pool) {
@@ -307,27 +298,30 @@ app.get("/orders", async (req, res) => {
   }
 });
 
+// contract: PUT /orders/:id  { userId, order }
 app.put("/orders/:id", async (req, res) => {
   try {
-    const userIdRaw = String(req.body?.userId || "").trim();
+    const userIdRaw = (req.body?.userId ?? "").toString().trim();
     const order = req.body?.order;
     const idRaw = String(req.params.id || "").trim();
 
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
-    if (!order || typeof order !== "object")
+    if (!idRaw) return res.status(400).json({ error: "Missing id" });
+    if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
+    }
 
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
-
     if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
     if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
 
     if (pool) {
       const updated = await pool.query(
         `UPDATE orders
-         SET order_id=$1, order_date=$2, customer_name=$3, product_name=$4, revenue=$5, product_cost=$6, shipping_cost=$7,
-             platform_fee=$8, other_costs=$9, status=$10, notes=$11
+         SET order_id=$1, order_date=$2, customer_name=$3, product_name=$4,
+             revenue=$5, product_cost=$6, shipping_cost=$7, platform_fee=$8,
+             other_costs=$9, status=$10, notes=$11
          WHERE id=$12 AND user_id=$13
          RETURNING *`,
         [
@@ -364,16 +358,17 @@ app.put("/orders/:id", async (req, res) => {
   }
 });
 
+// contract: DELETE /orders/:id?userId=...
 app.delete("/orders/:id", async (req, res) => {
   try {
     const userIdRaw = String(req.query.userId || "").trim();
     const idRaw = String(req.params.id || "").trim();
 
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
+    if (!idRaw) return res.status(400).json({ error: "Missing id" });
 
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
-
     if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
     if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
 
@@ -386,12 +381,12 @@ app.delete("/orders/:id", async (req, res) => {
       return res.json({ success: true });
     }
 
+    // fallback memory
     const before = mem.orders.length;
     mem.orders = mem.orders.filter(
       (o) => !(Number(o.id) === idNum && Number(o.user_id) === userIdNum)
     );
     if (mem.orders.length === before) return res.status(404).json({ error: "Order not found" });
-
     return res.json({ success: true });
   } catch (err) {
     console.error("DELETE /orders/:id error:", err);
