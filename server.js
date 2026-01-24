@@ -67,6 +67,29 @@ app.get("/", (req, res) => {
   res.json({ status: "ok", app: "Loguil", db: !!pool });
 });
 
+// -------------------- debug (DB test) --------------------
+app.get("/debug", async (req, res) => {
+  try {
+    const users = await pool.query("SELECT COUNT(*)::int AS count FROM users");
+    const orders = await pool.query("SELECT COUNT(*)::int AS count FROM orders");
+
+    res.json({
+      status: "ok",
+      app: "Loguil",
+      db: "connected",
+      users: users.rows[0].count,
+      orders: orders.rows[0].count
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      app: "Loguil",
+      db: "failed",
+      message: err.message
+    });
+  }
+});
+
 // -------------------- auth --------------------
 app.post("/signup", async (req, res) => {
   try {
