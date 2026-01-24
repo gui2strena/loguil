@@ -1814,8 +1814,14 @@ async function handleRegister(e) {
   closeOrderModal();
 
 } catch (err) {
-  showToast(err.message || "Failed to create order", "error");
-} finally {
+  const msg =
+    (err && err.message) ||
+    (typeof err === "string" ? err : "") ||
+    (err ? JSON.stringify(err) : "") ||
+    "Unknown error creating order";
+  showToast(msg, "error");
+}
+ finally {
   btn.disabled = false;
   btn.textContent = EN.orderModal.save;
 }
