@@ -290,6 +290,7 @@ app.post("/orders", async (req, res) => {
 });
 
 // contract: GET /orders?userId=...
+// contract: GET /orders?userId=...
 app.get("/orders", async (req, res) => {
   try {
     const userIdRaw = String(req.query.userId || "").trim();
