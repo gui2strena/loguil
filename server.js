@@ -69,6 +69,87 @@ async function ensureTables() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  const crypto = require("crypto");
+
+// -------------------- forgot/reset password (token-based) --------------------
+// contract: POST /forgot-password { email }
+// returns: { success: true, token }  (DEV only: in prod you email the link)
+app.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Missing email" });
+
+    const emailNorm = String(email).toLowerCase().trim();
+
+    if (!pool) {
+      // MVP fallback: no DB, can't safely do tokens
+      return res.status(400).json({ error: "Password reset requires DB" });
+    }
+
+    const found = await pool.query("SELECT id FROM users WHERE email=$1", [emailNorm]);
+    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+    const userId = found.rows[0].id;
+
+    // create token + expiry (30 min)
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+    // remove old tokens for this user (clean)
+    await pool.query("DELETE FROM password_resets WHERE user_id=$1", [userId]);
+
+    await pool.query(
+      "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1,$2,$3)",
+      [userId, token, expiresAt]
+    );
+
+    // DEV: return token (later we email it)
+    return res.json({ success: true, token });
+  } catch (err) {
+    console.error("POST /forgot-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// contract: POST /reset-password { token, newPassword }
+app.post("/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: "Missing token or newPassword" });
+    }
+
+    if (!pool) {
+      return res.status(400).json({ error: "Password reset requires DB" });
+    }
+
+    const tokenNorm = String(token).trim();
+
+    const row = await pool.query(
+      `SELECT user_id, expires_at
+       FROM password_resets
+       WHERE token=$1
+       LIMIT 1`,
+      [tokenNorm]
+    );
+
+    if (!row.rows.length) return res.status(400).json({ error: "Invalid token" });
+
+    const { user_id, expires_at } = row.rows[0];
+    const exp = new Date(expires_at).getTime();
+    if (Date.now() > exp) return res.status(400).json({ error: "Token expired" });
+
+    const password_hash = await bcrypt.hash(String(newPassword), 10);
+
+    await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [password_hash, user_id]);
+    await pool.query("DELETE FROM password_resets WHERE token=$1", [tokenNorm]); // invalidate
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("POST /reset-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
 }
 
 // run at startup
