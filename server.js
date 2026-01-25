@@ -6,7 +6,9 @@ const bcrypt = require("bcryptjs");
 let Pool;
 try {
   ({ Pool } = require("pg"));
-} catch { /* pg optional */ }
+} catch {
+  /* pg optional */
+}
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -93,7 +95,7 @@ app.get("/debug", async (req, res) => {
     const users = await pool.query("SELECT COUNT(*)::int AS count FROM users");
     const orders = await pool.query("SELECT COUNT(*)::int AS count FROM orders");
 
-    res.json({
+    return res.json({
       status: "ok",
       app: "Loguil",
       db: "connected",
@@ -101,7 +103,7 @@ app.get("/debug", async (req, res) => {
       orders: orders.rows[0].count,
     });
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
       status: "error",
       app: "Loguil",
       db: "failed",
@@ -160,7 +162,7 @@ app.post("/signup", async (req, res) => {
     return res.json({ success: true, user: safe });
   } catch (err) {
     console.error("POST /signup error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
@@ -200,7 +202,7 @@ app.post("/login", async (req, res) => {
     return res.json({ success: true, user: safe });
   } catch (err) {
     console.error("POST /login error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
@@ -208,14 +210,12 @@ app.post("/login", async (req, res) => {
 async function userExists(userIdNum) {
   if (!Number.isFinite(userIdNum)) return false;
 
-  // DB mode
   if (pool) {
     const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userIdNum]);
     return r.rows.length > 0;
   }
 
-  // fallback memory mode
-  return mem.users.some(u => Number(u.id) === userIdNum);
+  return mem.users.some((u) => Number(u.id) === userIdNum);
 }
 
 // -------------------- orders --------------------
@@ -285,26 +285,23 @@ app.post("/orders", async (req, res) => {
     return res.json({ success: true, order: newOrder });
   } catch (err) {
     console.error("POST /orders error:", err);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
+// contract: GET /orders?userId=...
 app.get("/orders", async (req, res) => {
   try {
     const userIdRaw = String(req.query.userId || "").trim();
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
 
-    const userIdNum = Number(userId);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-
-    const okUser = await userExists(userIdNum);
-    if (!okUser) return res.status(404).json({ error: "User not found" });
-
-
     const userIdNum = Number(userIdRaw);
     if (!Number.isFinite(userIdNum)) {
       return res.status(400).json({ error: "Invalid userId" });
     }
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
 
     if (pool) {
       const rows = await pool.query(
@@ -318,7 +315,7 @@ app.get("/orders", async (req, res) => {
     return res.json({ success: true, orders });
   } catch (err) {
     console.error("GET /orders error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
@@ -335,17 +332,13 @@ app.put("/orders/:id", async (req, res) => {
       return res.status(400).json({ error: "Missing order" });
     }
 
-    const userIdNum = Number(userId);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-
-    const okUser = await userExists(userIdNum);
-    if (!okUser) return res.status(404).json({ error: "User not found" });
-
-
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
     if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
     if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
 
     if (pool) {
       const updated = await pool.query(
@@ -385,7 +378,7 @@ app.put("/orders/:id", async (req, res) => {
     return res.json({ success: true, order: mem.orders[idx] });
   } catch (err) {
     console.error("PUT /orders/:id error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
@@ -398,17 +391,13 @@ app.delete("/orders/:id", async (req, res) => {
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
     if (!idRaw) return res.status(400).json({ error: "Missing id" });
 
-    const userIdNum = Number(userId);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-
-    const okUser = await userExists(userIdNum);
-    if (!okUser) return res.status(404).json({ error: "User not found" });
-
-
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
     if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
     if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
 
     if (pool) {
       const del = await pool.query(
@@ -428,7 +417,7 @@ app.delete("/orders/:id", async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     console.error("DELETE /orders/:id error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
