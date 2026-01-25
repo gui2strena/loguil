@@ -204,6 +204,20 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// -------------------- auth guard helpers --------------------
+async function userExists(userIdNum) {
+  if (!Number.isFinite(userIdNum)) return false;
+
+  // DB mode
+  if (pool) {
+    const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userIdNum]);
+    return r.rows.length > 0;
+  }
+
+  // fallback memory mode
+  return mem.users.some(u => Number(u.id) === userIdNum);
+}
+
 // -------------------- orders --------------------
 // contract: POST /orders { userId, order }
 app.post("/orders", async (req, res) => {
@@ -217,6 +231,9 @@ app.post("/orders", async (req, res) => {
     if (!Number.isFinite(userIdNum)) {
       return res.status(400).json({ error: "Invalid userId" });
     }
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
 
     if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
@@ -277,6 +294,13 @@ app.get("/orders", async (req, res) => {
     const userIdRaw = String(req.query.userId || "").trim();
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
 
+    const userIdNum = Number(userId);
+    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
+
+
     const userIdNum = Number(userIdRaw);
     if (!Number.isFinite(userIdNum)) {
       return res.status(400).json({ error: "Invalid userId" });
@@ -310,6 +334,13 @@ app.put("/orders/:id", async (req, res) => {
     if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
     }
+
+    const userIdNum = Number(userId);
+    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
+
 
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
@@ -366,6 +397,13 @@ app.delete("/orders/:id", async (req, res) => {
 
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
     if (!idRaw) return res.status(400).json({ error: "Missing id" });
+
+    const userIdNum = Number(userId);
+    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
+
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
+
 
     const userIdNum = Number(userIdRaw);
     const idNum = Number(idRaw);
