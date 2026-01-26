@@ -2,6 +2,8 @@
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+
 
 let Pool;
 try {
@@ -20,6 +22,38 @@ app.use(
   })
 );
 app.use(express.json());
+
+// -------------------- JWT --------------------
+// IMPORTANT: define JWT_SECRET in Render Environment for production
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const JWT_EXPIRES_IN = "7d";
+
+function signToken(user) {
+  // só o mínimo dentro do token
+  return jwt.sign(
+    { userId: Number(user.id), email: user.email },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const [type, token] = auth.split(" ");
+
+    if (type !== "Bearer" || !token) {
+      return res.status(401).json({ error: "Missing token" });
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET);
+    // payload.userId fica disponível para as rotas
+    req.auth = payload;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
 
 // -------------------- DB (optional but preferred) --------------------
 const hasDb = !!process.env.DATABASE_URL && !!Pool;
@@ -268,7 +302,9 @@ app.post("/login", async (req, res) => {
       if (!ok) return res.status(401).json({ error: "Incorrect password" });
 
       delete user.password_hash;
-      return res.json({ success: true, user });
+      const token = signToken(user);
+      return res.json({ success: true, user, token });
+
     }
 
     // fallback memory
@@ -280,7 +316,9 @@ app.post("/login", async (req, res) => {
 
     const safe = { ...user };
     delete safe.password_hash;
-    return res.json({ success: true, user: safe });
+    const token = signToken(safe);
+    return res.json({ success: true, user: safe, token });
+
   } catch (err) {
     console.error("POST /login error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
@@ -355,20 +393,24 @@ async function userExists(userIdNum) {
 
 // -------------------- orders --------------------
 // contract: POST /orders { userId, order }
-app.post("/orders", async (req, res) => {
+app.post("/orders", requireAuth, async (req, res) => {
   try {
-    const userIdRaw = (req.body?.userId ?? "").toString().trim();
-    const order = req.body?.order;
+    const userIdRaw = String(req.query.userId || "").trim();
+if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
 
-    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
+const userIdNum = Number(userIdRaw);
+if (!Number.isFinite(userIdNum)) {
+  return res.status(400).json({ error: "Invalid userId" });
+}
 
-    const userIdNum = Number(userIdRaw);
-    if (!Number.isFinite(userIdNum)) {
-      return res.status(400).json({ error: "Invalid userId" });
-    }
+// 🔐 token must match userId
+if (Number(req.auth.userId) !== userIdNum) {
+  return res.status(403).json({ error: "Forbidden" });
+}
 
-    const okUser = await userExists(userIdNum);
-    if (!okUser) return res.status(404).json({ error: "User not found" });
+const okUser = await userExists(userIdNum);
+if (!okUser) return res.status(404).json({ error: "User not found" });
+
 
     if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
@@ -426,7 +468,7 @@ app.post("/orders", async (req, res) => {
 
 // contract: GET /orders?userId=...
 // contract: GET /orders?userId=...
-app.get("/orders", async (req, res) => {
+app.get("/orders", requireAuth, async (req, res) => {
   try {
     const userIdRaw = String(req.query.userId || "").trim();
     if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
