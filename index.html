@@ -579,8 +579,33 @@ async function loadOrdersFromBackend() {
         </div>
         ${renderOrderModal()}
         ${renderDeleteModal()}
+        ${renderPasswordModal()}
       `;
     }
+   
+   function renderPasswordModal() {
+  return `
+    <div id="password-modal" class="fixed inset-0 bg-black/60 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+      <div class="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-2xl font-extrabold text-slate-900">Change Password</h3>
+          <button onclick="closePasswordModal()" class="p-2 hover:bg-slate-100 rounded-xl">
+            ✕
+          </button>
+        </div>
+
+        <form onsubmit="handleChangePassword(event)" class="space-y-4">
+          <input id="current-password" type="password" placeholder="Current password" required />
+          <input id="new-password" type="password" placeholder="New password" required minlength="6" />
+
+          <button id="change-pass-btn" type="submit">
+            Update password
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+}
 
     function renderHeader() {
       return `
@@ -608,7 +633,13 @@ async function loadOrdersFromBackend() {
                 <button onclick="showView('subscription')" id="nav-subscription" class="nav-btn px-4 py-2 rounded-xl text-sm font-semibold transition-all text-slate-600 hover:bg-slate-100">
                   ${EN.nav.plans}
                 </button>
-                <button onclick="logout()" class="ml-2 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                <button onclick="openPasswordModal()" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all" title="Change password">
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+      d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 0v3m-7 7h14a2 2 0 002-2v-5a4 4 0 00-4-4H7a4 4 0 00-4 4v5a2 2 0 002 2z" />
+  </svg>
+</button>
+<button onclick="logout()" class="ml-2 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
                   </svg>
@@ -1272,6 +1303,52 @@ async function handleRegister(e) {
       render();
       showToast(EN.nav.logoutSuccess, 'info');
     }
+
+   function openPasswordModal() {
+  const m = document.getElementById("password-modal");
+  if (!m) return;
+  document.getElementById("current-password").value = "";
+  document.getElementById("new-password").value = "";
+  m.classList.remove("hidden");
+}
+
+function closePasswordModal() {
+  const m = document.getElementById("password-modal");
+  if (!m) return;
+  m.classList.add("hidden");
+}
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+
+  const currentPassword = document.getElementById("current-password").value;
+  const newPassword = document.getElementById("new-password").value;
+
+  const btn = document.getElementById("change-pass-btn");
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = "Updating...";
+
+  try {
+    await api("/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: currentUser.__backendId,
+        currentPassword,
+        newPassword
+      })
+    });
+
+    showToast("Password updated successfully ✅", "success");
+    closePasswordModal();
+
+  } catch (err) {
+    showToast(err.message || "Failed to update password", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
 
     function showMainApp() {
       render();
