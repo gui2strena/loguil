@@ -1860,7 +1860,8 @@ async function handleChangePassword(e) {
   };
 
     const payload = {
-  userId: currentUser.__backendId,         // backend espera isso
+  userId: Number(currentUser.__backendId),
+                                           // backend espera isso
   order: orderData,                        // backend espera isso
   ...orderData                             // mantém compatibilidade
 };
