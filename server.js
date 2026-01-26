@@ -287,6 +287,60 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// -------------------- change password --------------------
+// contract: POST /change-password { userId, currentPassword, newPassword }
+app.post("/change-password", async (req, res) => {
+  try {
+    const userIdRaw = (req.body?.userId ?? "").toString().trim();
+    const currentPassword = (req.body?.currentPassword ?? "").toString();
+    const newPassword = (req.body?.newPassword ?? "").toString();
+
+    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
+
+    const userIdNum = Number(userIdRaw);
+    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Missing password fields" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+
+    // DB mode
+    if (pool) {
+      const found = await pool.query(
+        "SELECT id, password_hash FROM users WHERE id=$1",
+        [userIdNum]
+      );
+      if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+      const ok = await bcrypt.compare(currentPassword, found.rows[0].password_hash);
+      if (!ok) return res.status(401).json({ error: "Incorrect current password" });
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [newHash, userIdNum]);
+
+      return res.json({ success: true });
+    }
+
+    // fallback memory mode
+    const u = mem.users.find(x => Number(x.id) === userIdNum);
+    if (!u) return res.status(404).json({ error: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, u.password_hash);
+    if (!ok) return res.status(401).json({ error: "Incorrect current password" });
+
+    u.password_hash = await bcrypt.hash(newPassword, 10);
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error("POST /change-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
 // -------------------- auth guard helpers --------------------
 async function userExists(userIdNum) {
   if (!Number.isFinite(userIdNum)) return false;
