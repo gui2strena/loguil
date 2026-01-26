@@ -1,9 +1,9 @@
-// Loguil Backend – Users + Orders (Postgres)
+// server.js — Loguil Backend (Users + Orders + Password Reset) — Postgres (optional) + Memory fallback
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
+const crypto = require("crypto");
 
 let Pool;
 try {
@@ -15,6 +15,7 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// -------------------- middleware --------------------
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || "*",
@@ -24,12 +25,10 @@ app.use(
 app.use(express.json());
 
 // -------------------- JWT --------------------
-// IMPORTANT: define JWT_SECRET in Render Environment for production
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXPIRES_IN = "7d";
 
 function signToken(user) {
-  // só o mínimo dentro do token
   return jwt.sign(
     { userId: Number(user.id), email: user.email },
     JWT_SECRET,
@@ -47,8 +46,7 @@ function requireAuth(req, res, next) {
     }
 
     const payload = jwt.verify(token, JWT_SECRET);
-    // payload.userId fica disponível para as rotas
-    req.auth = payload;
+    req.auth = payload; // { userId, email, iat, exp }
     return next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });
@@ -70,6 +68,38 @@ const mem = {
   orders: [], // {id,user_id,...,created_at}
 };
 
+// -------------------- helpers --------------------
+function toInt(value) {
+  const n = Number(String(value ?? "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+async function userExists(userIdNum) {
+  if (!Number.isFinite(userIdNum)) return false;
+
+  if (pool) {
+    const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [
+      userIdNum,
+    ]);
+    return r.rows.length > 0;
+  }
+
+  return mem.users.some((u) => Number(u.id) === userIdNum);
+}
+
+function assertAuthMatches(req, res, userIdNum) {
+  if (!req.auth || !Number.isFinite(Number(req.auth.userId))) {
+    res.status(401).json({ error: "Invalid token" });
+    return false;
+  }
+  if (Number(req.auth.userId) !== userIdNum) {
+    res.status(403).json({ error: "Forbidden" });
+    return false;
+  }
+  return true;
+}
+
+// -------------------- DB init --------------------
 async function ensureTables() {
   if (!pool) return;
 
@@ -88,7 +118,7 @@ async function ensureTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS orders (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       order_id TEXT NOT NULL,
       order_date DATE NOT NULL,
       customer_name TEXT,
@@ -103,11 +133,223 @@ async function ensureTables() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
-  const crypto = require("crypto");
 
-// -------------------- forgot/reset password (token-based) --------------------
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_created
+    ON orders (user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user
+    ON password_resets (user_id);
+  `);
+}
+
+// run at startup
+ensureTables().catch((err) =>
+  console.error("DB init error:", err.message || err)
+);
+
+// -------------------- health --------------------
+app.get("/", (req, res) => {
+  res.json({ status: "ok", app: "Loguil", db: !!pool });
+});
+
+// -------------------- debug --------------------
+app.get("/debug", async (req, res) => {
+  try {
+    if (!pool) {
+      return res.json({
+        status: "ok",
+        app: "Loguil",
+        db: "disabled",
+        users: mem.users.length,
+        orders: mem.orders.length,
+      });
+    }
+
+    const users = await pool.query("SELECT COUNT(*)::int AS count FROM users");
+    const orders = await pool.query("SELECT COUNT(*)::int AS count FROM orders");
+
+    return res.json({
+      status: "ok",
+      app: "Loguil",
+      db: "connected",
+      users: users.rows[0].count,
+      orders: orders.rows[0].count,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      status: "error",
+      app: "Loguil",
+      db: "failed",
+      message: err.message,
+    });
+  }
+});
+
+// -------------------- auth: signup --------------------
+app.post("/signup", async (req, res) => {
+  try {
+    const { email, password, storeName, currency } = req.body || {};
+    if (!email || !password || !storeName || !currency) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const emailNorm = String(email).toLowerCase().trim();
+    const password_hash = await bcrypt.hash(String(password), 10);
+    const trial_ends = new Date(Date.now() + 14 * 86400000).toISOString();
+
+    if (pool) {
+      const existing = await pool.query("SELECT id FROM users WHERE email=$1", [
+        emailNorm,
+      ]);
+      if (existing.rows.length) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      const created = await pool.query(
+        `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends)
+         VALUES ($1,$2,$3,$4,'trial',$5)
+         RETURNING id,email,store_name,currency,plan,trial_ends`,
+        [emailNorm, password_hash, String(storeName), String(currency), trial_ends]
+      );
+
+      return res.json({ success: true, user: created.rows[0] });
+    }
+
+    // memory fallback
+    const exists = mem.users.find((u) => u.email === emailNorm);
+    if (exists) return res.status(400).json({ error: "Email already registered" });
+
+    const user = {
+      id: mem.users.length + 1,
+      email: emailNorm,
+      password_hash,
+      store_name: String(storeName),
+      currency: String(currency),
+      plan: "trial",
+      trial_ends,
+    };
+    mem.users.push(user);
+
+    const safe = { ...user };
+    delete safe.password_hash;
+    return res.json({ success: true, user: safe });
+  } catch (err) {
+    console.error("POST /signup error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// -------------------- auth: login --------------------
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "Missing credentials" });
+    }
+
+    const emailNorm = String(email).toLowerCase().trim();
+
+    if (pool) {
+      const found = await pool.query(
+        "SELECT id,email,password_hash,store_name,currency,plan,trial_ends FROM users WHERE email=$1",
+        [emailNorm]
+      );
+      if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+      const user = found.rows[0];
+      const ok = await bcrypt.compare(String(password), user.password_hash);
+      if (!ok) return res.status(401).json({ error: "Incorrect password" });
+
+      delete user.password_hash;
+      const token = signToken(user);
+      return res.json({ success: true, user, token });
+    }
+
+    // memory fallback
+    const user = mem.users.find((u) => u.email === emailNorm);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const ok = await bcrypt.compare(String(password), user.password_hash);
+    if (!ok) return res.status(401).json({ error: "Incorrect password" });
+
+    const safe = { ...user };
+    delete safe.password_hash;
+    const token = signToken(safe);
+    return res.json({ success: true, user: safe, token });
+  } catch (err) {
+    console.error("POST /login error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// -------------------- change password --------------------
+// contract: POST /change-password { userId, currentPassword, newPassword }
+app.post("/change-password", requireAuth, async (req, res) => {
+  try {
+    const userIdNum = toInt(req.body?.userId);
+    const currentPassword = (req.body?.currentPassword ?? "").toString();
+    const newPassword = (req.body?.newPassword ?? "").toString();
+
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
+    if (!assertAuthMatches(req, res, userIdNum)) return;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Missing password fields" });
+    }
+    if (newPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters" });
+    }
+
+    if (pool) {
+      const found = await pool.query("SELECT id, password_hash FROM users WHERE id=$1", [
+        userIdNum,
+      ]);
+      if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+      const ok = await bcrypt.compare(currentPassword, found.rows[0].password_hash);
+      if (!ok) return res.status(401).json({ error: "Incorrect current password" });
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [
+        newHash,
+        userIdNum,
+      ]);
+      return res.json({ success: true });
+    }
+
+    // memory mode
+    const u = mem.users.find((x) => Number(x.id) === userIdNum);
+    if (!u) return res.status(404).json({ error: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, u.password_hash);
+    if (!ok) return res.status(401).json({ error: "Incorrect current password" });
+
+    u.password_hash = await bcrypt.hash(newPassword, 10);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("POST /change-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// -------------------- forgot/reset password (token-based, DB only) --------------------
 // contract: POST /forgot-password { email }
-// returns: { success: true, token }  (DEV only: in prod you email the link)
+// DEV: returns { success:true, token } (in prod you email the link)
 app.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body || {};
@@ -116,7 +358,6 @@ app.post("/forgot-password", async (req, res) => {
     const emailNorm = String(email).toLowerCase().trim();
 
     if (!pool) {
-      // MVP fallback: no DB, can't safely do tokens
       return res.status(400).json({ error: "Password reset requires DB" });
     }
 
@@ -125,11 +366,10 @@ app.post("/forgot-password", async (req, res) => {
 
     const userId = found.rows[0].id;
 
-    // create token + expiry (30 min)
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
 
-    // remove old tokens for this user (clean)
+    // remove old tokens for this user
     await pool.query("DELETE FROM password_resets WHERE user_id=$1", [userId]);
 
     await pool.query(
@@ -137,7 +377,7 @@ app.post("/forgot-password", async (req, res) => {
       [userId, token, expiresAt]
     );
 
-    // DEV: return token (later we email it)
+    // ⚠️ DEV only: return token. In production, email it.
     return res.json({ success: true, token });
   } catch (err) {
     console.error("POST /forgot-password error:", err);
@@ -173,9 +413,18 @@ app.post("/reset-password", async (req, res) => {
     const exp = new Date(expires_at).getTime();
     if (Date.now() > exp) return res.status(400).json({ error: "Token expired" });
 
+    if (String(newPassword).length < 6) {
+      return res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters" });
+    }
+
     const password_hash = await bcrypt.hash(String(newPassword), 10);
 
-    await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [password_hash, user_id]);
+    await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [
+      password_hash,
+      user_id,
+    ]);
     await pool.query("DELETE FROM password_resets WHERE token=$1", [tokenNorm]); // invalidate
 
     return res.json({ success: true });
@@ -184,234 +433,20 @@ app.post("/reset-password", async (req, res) => {
     return res.status(500).json({ error: err.message || "Server error" });
   }
 });
-}
-
-// run at startup
-ensureTables().catch((err) => console.error("DB init error:", err.message));
-
-// -------------------- health --------------------
-app.get("/", (req, res) => {
-  res.json({ status: "ok", app: "Loguil", db: !!pool });
-});
-
-// -------------------- debug (DB test) --------------------
-app.get("/debug", async (req, res) => {
-  try {
-    if (!pool) {
-      return res.json({
-        status: "ok",
-        app: "Loguil",
-        db: "disabled",
-        users: mem.users.length,
-        orders: mem.orders.length,
-      });
-    }
-
-    const users = await pool.query("SELECT COUNT(*)::int AS count FROM users");
-    const orders = await pool.query("SELECT COUNT(*)::int AS count FROM orders");
-
-    return res.json({
-      status: "ok",
-      app: "Loguil",
-      db: "connected",
-      users: users.rows[0].count,
-      orders: orders.rows[0].count,
-    });
-  } catch (err) {
-    return res.status(500).json({
-      status: "error",
-      app: "Loguil",
-      db: "failed",
-      message: err.message,
-    });
-  }
-});
-
-// -------------------- auth --------------------
-app.post("/signup", async (req, res) => {
-  try {
-    const { email, password, storeName, currency } = req.body || {};
-    if (!email || !password || !storeName || !currency) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const emailNorm = String(email).toLowerCase().trim();
-    const password_hash = await bcrypt.hash(String(password), 10);
-    const trial_ends = new Date(Date.now() + 14 * 86400000).toISOString();
-
-    if (pool) {
-      const existing = await pool.query("SELECT id FROM users WHERE email=$1", [
-        emailNorm,
-      ]);
-      if (existing.rows.length) {
-        return res.status(400).json({ error: "Email already registered" });
-      }
-
-      const created = await pool.query(
-        `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends)
-         VALUES ($1,$2,$3,$4,'trial',$5)
-         RETURNING id,email,store_name,currency,plan,trial_ends`,
-        [emailNorm, password_hash, String(storeName), String(currency), trial_ends]
-      );
-
-      return res.json({ success: true, user: created.rows[0] });
-    }
-
-    // fallback memory
-    const exists = mem.users.find((u) => u.email === emailNorm);
-    if (exists) return res.status(400).json({ error: "Email already registered" });
-
-    const user = {
-      id: mem.users.length + 1,
-      email: emailNorm,
-      password_hash,
-      store_name: String(storeName),
-      currency: String(currency),
-      plan: "trial",
-      trial_ends,
-    };
-    mem.users.push(user);
-
-    const safe = { ...user };
-    delete safe.password_hash;
-    return res.json({ success: true, user: safe });
-  } catch (err) {
-    console.error("POST /signup error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing credentials" });
-    }
-
-    const emailNorm = String(email).toLowerCase().trim();
-
-    if (pool) {
-      const found = await pool.query(
-        "SELECT id,email,password_hash,store_name,currency,plan,trial_ends FROM users WHERE email=$1",
-        [emailNorm]
-      );
-      if (!found.rows.length) return res.status(404).json({ error: "User not found" });
-
-      const user = found.rows[0];
-      const ok = await bcrypt.compare(String(password), user.password_hash);
-      if (!ok) return res.status(401).json({ error: "Incorrect password" });
-
-      delete user.password_hash;
-      const token = signToken(user);
-      return res.json({ success: true, user, token });
-
-    }
-
-    // fallback memory
-    const user = mem.users.find((u) => u.email === emailNorm);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const ok = await bcrypt.compare(String(password), user.password_hash);
-    if (!ok) return res.status(401).json({ error: "Incorrect password" });
-
-    const safe = { ...user };
-    delete safe.password_hash;
-    const token = signToken(safe);
-    return res.json({ success: true, user: safe, token });
-
-  } catch (err) {
-    console.error("POST /login error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
-// -------------------- change password --------------------
-// contract: POST /change-password { userId, currentPassword, newPassword }
-app.post("/change-password", async (req, res) => {
-  try {
-    const userIdRaw = (req.body?.userId ?? "").toString().trim();
-    const currentPassword = (req.body?.currentPassword ?? "").toString();
-    const newPassword = (req.body?.newPassword ?? "").toString();
-
-    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
-
-    const userIdNum = Number(userIdRaw);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: "Missing password fields" });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters" });
-    }
-
-    // DB mode
-    if (pool) {
-      const found = await pool.query(
-        "SELECT id, password_hash FROM users WHERE id=$1",
-        [userIdNum]
-      );
-      if (!found.rows.length) return res.status(404).json({ error: "User not found" });
-
-      const ok = await bcrypt.compare(currentPassword, found.rows[0].password_hash);
-      if (!ok) return res.status(401).json({ error: "Incorrect current password" });
-
-      const newHash = await bcrypt.hash(newPassword, 10);
-      await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [newHash, userIdNum]);
-
-      return res.json({ success: true });
-    }
-
-    // fallback memory mode
-    const u = mem.users.find(x => Number(x.id) === userIdNum);
-    if (!u) return res.status(404).json({ error: "User not found" });
-
-    const ok = await bcrypt.compare(currentPassword, u.password_hash);
-    if (!ok) return res.status(401).json({ error: "Incorrect current password" });
-
-    u.password_hash = await bcrypt.hash(newPassword, 10);
-    return res.json({ success: true });
-
-  } catch (err) {
-    console.error("POST /change-password error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
-// -------------------- auth guard helpers --------------------
-async function userExists(userIdNum) {
-  if (!Number.isFinite(userIdNum)) return false;
-
-  if (pool) {
-    const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userIdNum]);
-    return r.rows.length > 0;
-  }
-
-  return mem.users.some((u) => Number(u.id) === userIdNum);
-}
 
 // -------------------- orders --------------------
-// contract: POST /orders { userId, order }
+// POST /orders?userId=123  body: { order: {...} }
 app.post("/orders", requireAuth, async (req, res) => {
   try {
-    const userIdRaw = String(req.query.userId || "").trim();
-if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
+    const userIdNum = toInt(req.query.userId);
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
 
-const userIdNum = Number(userIdRaw);
-if (!Number.isFinite(userIdNum)) {
-  return res.status(400).json({ error: "Invalid userId" });
-}
+    if (!assertAuthMatches(req, res, userIdNum)) return;
 
-// 🔐 token must match userId
-if (Number(req.auth.userId) !== userIdNum) {
-  return res.status(403).json({ error: "Forbidden" });
-}
+    const okUser = await userExists(userIdNum);
+    if (!okUser) return res.status(404).json({ error: "User not found" });
 
-const okUser = await userExists(userIdNum);
-if (!okUser) return res.status(404).json({ error: "User not found" });
-
-
+    const order = req.body?.order;
     if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
     }
@@ -451,7 +486,7 @@ if (!okUser) return res.status(404).json({ error: "User not found" });
       return res.json({ success: true, order: created.rows[0] });
     }
 
-    // fallback memory
+    // memory fallback
     const newOrder = {
       id: Date.now(),
       user_id: userIdNum,
@@ -466,17 +501,13 @@ if (!okUser) return res.status(404).json({ error: "User not found" });
   }
 });
 
-// contract: GET /orders?userId=...
-// contract: GET /orders?userId=...
+// GET /orders?userId=123
 app.get("/orders", requireAuth, async (req, res) => {
   try {
-    const userIdRaw = String(req.query.userId || "").trim();
-    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
+    const userIdNum = toInt(req.query.userId);
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
 
-    const userIdNum = Number(userIdRaw);
-    if (!Number.isFinite(userIdNum)) {
-      return res.status(400).json({ error: "Invalid userId" });
-    }
+    if (!assertAuthMatches(req, res, userIdNum)) return;
 
     const okUser = await userExists(userIdNum);
     if (!okUser) return res.status(404).json({ error: "User not found" });
@@ -497,23 +528,20 @@ app.get("/orders", requireAuth, async (req, res) => {
   }
 });
 
-// contract: PUT /orders/:id  { userId, order }
-app.put("/orders/:id", async (req, res) => {
+// PUT /orders/:id   body: { userId, order }
+app.put("/orders/:id", requireAuth, async (req, res) => {
   try {
-    const userIdRaw = (req.body?.userId ?? "").toString().trim();
+    const userIdNum = toInt(req.body?.userId);
+    const idNum = toInt(req.params.id);
     const order = req.body?.order;
-    const idRaw = String(req.params.id || "").trim();
 
-    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
-    if (!idRaw) return res.status(400).json({ error: "Missing id" });
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
+    if (!idNum) return res.status(400).json({ error: "Missing/invalid id" });
+    if (!assertAuthMatches(req, res, userIdNum)) return;
+
     if (!order || typeof order !== "object") {
       return res.status(400).json({ error: "Missing order" });
     }
-
-    const userIdNum = Number(userIdRaw);
-    const idNum = Number(idRaw);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-    if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
 
     const okUser = await userExists(userIdNum);
     if (!okUser) return res.status(404).json({ error: "User not found" });
@@ -546,7 +574,7 @@ app.put("/orders/:id", async (req, res) => {
       return res.json({ success: true, order: updated.rows[0] });
     }
 
-    // fallback memory
+    // memory fallback
     const idx = mem.orders.findIndex(
       (o) => Number(o.id) === idNum && Number(o.user_id) === userIdNum
     );
@@ -560,19 +588,16 @@ app.put("/orders/:id", async (req, res) => {
   }
 });
 
-// contract: DELETE /orders/:id?userId=...
-app.delete("/orders/:id", async (req, res) => {
+// DELETE /orders/:id?userId=123
+app.delete("/orders/:id", requireAuth, async (req, res) => {
   try {
-    const userIdRaw = String(req.query.userId || "").trim();
-    const idRaw = String(req.params.id || "").trim();
+    const userIdNum = toInt(req.query.userId);
+    const idNum = toInt(req.params.id);
 
-    if (!userIdRaw) return res.status(400).json({ error: "Missing userId" });
-    if (!idRaw) return res.status(400).json({ error: "Missing id" });
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
+    if (!idNum) return res.status(400).json({ error: "Missing/invalid id" });
 
-    const userIdNum = Number(userIdRaw);
-    const idNum = Number(idRaw);
-    if (!Number.isFinite(userIdNum)) return res.status(400).json({ error: "Invalid userId" });
-    if (!Number.isFinite(idNum)) return res.status(400).json({ error: "Invalid id" });
+    if (!assertAuthMatches(req, res, userIdNum)) return;
 
     const okUser = await userExists(userIdNum);
     if (!okUser) return res.status(404).json({ error: "User not found" });
@@ -586,12 +611,13 @@ app.delete("/orders/:id", async (req, res) => {
       return res.json({ success: true });
     }
 
-    // fallback memory
+    // memory fallback
     const before = mem.orders.length;
     mem.orders = mem.orders.filter(
       (o) => !(Number(o.id) === idNum && Number(o.user_id) === userIdNum)
     );
     if (mem.orders.length === before) return res.status(404).json({ error: "Order not found" });
+
     return res.json({ success: true });
   } catch (err) {
     console.error("DELETE /orders/:id error:", err);
