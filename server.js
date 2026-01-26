@@ -1,4 +1,4 @@
-// server.js — Loguil Backend (Users + Orders + Password Reset) — Postgres (optional) + Memory fallback
+// server.js — Loguil Backend (Users + Orders + Change Password) — Postgres (optional) + Memory fallback
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
@@ -24,35 +24,6 @@ app.use(
 );
 app.use(express.json());
 
-// -------------------- JWT --------------------
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
-const JWT_EXPIRES_IN = "7d";
-
-function signToken(user) {
-  return jwt.sign(
-    { userId: Number(user.id), email: user.email },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
-  );
-}
-
-function requireAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization || "";
-    const [type, token] = auth.split(" ");
-
-    if (type !== "Bearer" || !token) {
-      return res.status(401).json({ error: "Missing token" });
-    }
-
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.auth = payload; // { userId, email, iat, exp }
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token" });
-  }
-}
-
 // -------------------- DB (optional but preferred) --------------------
 const hasDb = !!process.env.DATABASE_URL && !!Pool;
 const pool = hasDb
@@ -64,7 +35,7 @@ const pool = hasDb
 
 // fallback memory (if DB missing)
 const mem = {
-  users: [], // {id,email,password_hash,store_name,currency,plan,trial_ends}
+  users: [],  // {id,email,password_hash,store_name,currency,plan,trial_ends}
   orders: [], // {id,user_id,...,created_at}
 };
 
@@ -78,21 +49,72 @@ async function userExists(userIdNum) {
   if (!Number.isFinite(userIdNum)) return false;
 
   if (pool) {
-    const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [
-      userIdNum,
-    ]);
+    const r = await pool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userIdNum]);
     return r.rows.length > 0;
   }
 
   return mem.users.some((u) => Number(u.id) === userIdNum);
 }
 
+// -------------------- JWT --------------------
+// IMPORTANT: set JWT_SECRET in Render Environment for production.
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const JWT_EXPIRES_IN = "7d";
+
+function signToken(user) {
+  return jwt.sign(
+    { userId: Number(user.id), email: String(user.email || "") },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+/**
+ * Accept token from:
+ * - Authorization: Bearer <token>
+ * - x-auth-token: <token>
+ * - ?token=<token>
+ * - body.token
+ */
+function extractToken(req) {
+  const auth = String(req.headers.authorization || "").trim();
+  if (auth) {
+    const [type, token] = auth.split(" ");
+    if (type === "Bearer" && token) return token.trim();
+  }
+
+  const x = String(req.headers["x-auth-token"] || "").trim();
+  if (x) return x;
+
+  const q = String(req.query.token || "").trim();
+  if (q) return q;
+
+  const b = String(req.body?.token || "").trim();
+  if (b) return b;
+
+  return "";
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const token = extractToken(req);
+    if (!token) return res.status(401).json({ error: "Missing token" });
+
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.auth = payload; // { userId, email, iat, exp }
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
 function assertAuthMatches(req, res, userIdNum) {
-  if (!req.auth || !Number.isFinite(Number(req.auth.userId))) {
+  const tokenUserId = Number(req.auth?.userId);
+  if (!Number.isFinite(tokenUserId)) {
     res.status(401).json({ error: "Invalid token" });
     return false;
   }
-  if (Number(req.auth.userId) !== userIdNum) {
+  if (tokenUserId !== userIdNum) {
     res.status(403).json({ error: "Forbidden" });
     return false;
   }
@@ -139,6 +161,7 @@ async function ensureTables() {
     ON orders (user_id, created_at DESC);
   `);
 
+  // Optional table for future reset-password flow
   await pool.query(`
     CREATE TABLE IF NOT EXISTS password_resets (
       id SERIAL PRIMARY KEY,
@@ -155,10 +178,7 @@ async function ensureTables() {
   `);
 }
 
-// run at startup
-ensureTables().catch((err) =>
-  console.error("DB init error:", err.message || err)
-);
+ensureTables().catch((err) => console.error("DB init error:", err.message || err));
 
 // -------------------- health --------------------
 app.get("/", (req, res) => {
@@ -211,9 +231,7 @@ app.post("/signup", async (req, res) => {
     const trial_ends = new Date(Date.now() + 14 * 86400000).toISOString();
 
     if (pool) {
-      const existing = await pool.query("SELECT id FROM users WHERE email=$1", [
-        emailNorm,
-      ]);
+      const existing = await pool.query("SELECT id FROM users WHERE email=$1", [emailNorm]);
       if (existing.rows.length) {
         return res.status(400).json({ error: "Email already registered" });
       }
@@ -225,6 +243,7 @@ app.post("/signup", async (req, res) => {
         [emailNorm, password_hash, String(storeName), String(currency), trial_ends]
       );
 
+      // You can auto-login after signup by returning a token here if you want.
       return res.json({ success: true, user: created.rows[0] });
     }
 
@@ -297,6 +316,7 @@ app.post("/login", async (req, res) => {
 
 // -------------------- change password --------------------
 // contract: POST /change-password { userId, currentPassword, newPassword }
+// Requires Authorization: Bearer <token>
 app.post("/change-password", requireAuth, async (req, res) => {
   try {
     const userIdNum = toInt(req.body?.userId);
@@ -310,25 +330,18 @@ app.post("/change-password", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Missing password fields" });
     }
     if (newPassword.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "New password must be at least 6 characters" });
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
     }
 
     if (pool) {
-      const found = await pool.query("SELECT id, password_hash FROM users WHERE id=$1", [
-        userIdNum,
-      ]);
+      const found = await pool.query("SELECT id, password_hash FROM users WHERE id=$1", [userIdNum]);
       if (!found.rows.length) return res.status(404).json({ error: "User not found" });
 
       const ok = await bcrypt.compare(currentPassword, found.rows[0].password_hash);
       if (!ok) return res.status(401).json({ error: "Incorrect current password" });
 
       const newHash = await bcrypt.hash(newPassword, 10);
-      await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [
-        newHash,
-        userIdNum,
-      ]);
+      await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [newHash, userIdNum]);
       return res.json({ success: true });
     }
 
@@ -347,100 +360,18 @@ app.post("/change-password", requireAuth, async (req, res) => {
   }
 });
 
-// -------------------- forgot/reset password (token-based, DB only) --------------------
-// contract: POST /forgot-password { email }
-// DEV: returns { success:true, token } (in prod you email the link)
-app.post("/forgot-password", async (req, res) => {
-  try {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: "Missing email" });
-
-    const emailNorm = String(email).toLowerCase().trim();
-
-    if (!pool) {
-      return res.status(400).json({ error: "Password reset requires DB" });
-    }
-
-    const found = await pool.query("SELECT id FROM users WHERE email=$1", [emailNorm]);
-    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
-
-    const userId = found.rows[0].id;
-
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
-
-    // remove old tokens for this user
-    await pool.query("DELETE FROM password_resets WHERE user_id=$1", [userId]);
-
-    await pool.query(
-      "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1,$2,$3)",
-      [userId, token, expiresAt]
-    );
-
-    // ⚠️ DEV only: return token. In production, email it.
-    return res.json({ success: true, token });
-  } catch (err) {
-    console.error("POST /forgot-password error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
-// contract: POST /reset-password { token, newPassword }
-app.post("/reset-password", async (req, res) => {
-  try {
-    const { token, newPassword } = req.body || {};
-    if (!token || !newPassword) {
-      return res.status(400).json({ error: "Missing token or newPassword" });
-    }
-
-    if (!pool) {
-      return res.status(400).json({ error: "Password reset requires DB" });
-    }
-
-    const tokenNorm = String(token).trim();
-
-    const row = await pool.query(
-      `SELECT user_id, expires_at
-       FROM password_resets
-       WHERE token=$1
-       LIMIT 1`,
-      [tokenNorm]
-    );
-
-    if (!row.rows.length) return res.status(400).json({ error: "Invalid token" });
-
-    const { user_id, expires_at } = row.rows[0];
-    const exp = new Date(expires_at).getTime();
-    if (Date.now() > exp) return res.status(400).json({ error: "Token expired" });
-
-    if (String(newPassword).length < 6) {
-      return res
-        .status(400)
-        .json({ error: "New password must be at least 6 characters" });
-    }
-
-    const password_hash = await bcrypt.hash(String(newPassword), 10);
-
-    await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [
-      password_hash,
-      user_id,
-    ]);
-    await pool.query("DELETE FROM password_resets WHERE token=$1", [tokenNorm]); // invalidate
-
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("POST /reset-password error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
 // -------------------- orders --------------------
-// POST /orders?userId=123  body: { order: {...} }
+// IMPORTANT CONTRACTS (match frontend patterns):
+// - POST   /orders        body: { userId, order }   (requires token)
+// - GET    /orders?userId=123                      (requires token)
+// - PUT    /orders/:id    body: { userId, order }   (requires token)
+// - DELETE /orders/:id?userId=123                  (requires token)
+
+// POST /orders  body: { userId, order }
 app.post("/orders", requireAuth, async (req, res) => {
   try {
-    const userIdNum = toInt(req.query.userId);
+    const userIdNum = toInt(req.body?.userId);
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
-
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
     const okUser = await userExists(userIdNum);
@@ -506,7 +437,6 @@ app.get("/orders", requireAuth, async (req, res) => {
   try {
     const userIdNum = toInt(req.query.userId);
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
-
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
     const okUser = await userExists(userIdNum);
@@ -528,7 +458,7 @@ app.get("/orders", requireAuth, async (req, res) => {
   }
 });
 
-// PUT /orders/:id   body: { userId, order }
+// PUT /orders/:id  body: { userId, order }
 app.put("/orders/:id", requireAuth, async (req, res) => {
   try {
     const userIdNum = toInt(req.body?.userId);
@@ -596,7 +526,6 @@ app.delete("/orders/:id", requireAuth, async (req, res) => {
 
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!idNum) return res.status(400).json({ error: "Missing/invalid id" });
-
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
     const okUser = await userExists(userIdNum);
