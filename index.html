@@ -421,8 +421,14 @@
 const API_BASE = "https://loguil-backend.onrender.com";
 
 async function api(path, options = {}) {
+  const token = localStorage.getItem("authToken");
+
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    },
     ...options
   });
 
@@ -430,7 +436,6 @@ async function api(path, options = {}) {
   try { data = await resp.json(); } catch {}
 
   if (!resp.ok) {
-    // Mostra exatamente o erro que vem do backend
     const msg =
       data?.error ||
       data?.message ||
@@ -1213,6 +1218,8 @@ async function handleLogin(e) {
     });
 
     const data = await resp.json();
+    localStorage.setItem("authToken", data.token);
+
 
     if (!resp.ok) {
       showToast(data.error || "Login failed", "error");
