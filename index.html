@@ -1240,6 +1240,16 @@ localStorage.setItem("authToken", data.token);
       trial_ends: backendUser.trial_ends || fallbackTrialEnd,
       subscription_status: backendUser.subscription_status || "active"
     };
+ // SAVE FULL USER PROFILE FOR PAGE REFRESH
+localStorage.setItem("currentUserProfile", JSON.stringify({
+  __backendId: currentUser.__backendId,
+  email: currentUser.email,
+  store_name: currentUser.store_name,
+  currency: currentUser.currency,
+  plan: currentUser.plan,
+  trial_ends: currentUser.trial_ends,
+  subscription_status: currentUser.subscription_status
+}));
 
     localStorage.setItem("currentUserId", currentUser.__backendId);
     localStorage.removeItem("pendingStoreName");
@@ -1302,10 +1312,11 @@ async function handleRegister(e) {
   }
 }
    
-   function logout() {
+  function logout() {
   currentUser = null;
   localStorage.removeItem("currentUserId");
   localStorage.removeItem("authToken");
+  localStorage.removeItem("currentUserProfile");
   render();
   showToast(EN.nav.logoutSuccess, "info");
 }
@@ -1979,24 +1990,35 @@ async function handleChangePassword(e) {
     async function init() {
       render();
 
-       // Auto-login after refresh
-  const savedUserId = localStorage.getItem("currentUserId");
-  const token = localStorage.getItem("authToken");
+  // AUTO LOGIN AFTER PAGE REFRESH
+const savedUserId = localStorage.getItem("currentUserId");
+const token = localStorage.getItem("authToken");
+const savedProfileRaw = localStorage.getItem("currentUserProfile");
 
-  if (savedUserId && token) {
-    currentUser = { __backendId: String(savedUserId) };
+if (savedUserId && token) {
+  let savedProfile = null;
+  try {
+    savedProfile = savedProfileRaw ? JSON.parse(savedProfileRaw) : null;
+  } catch {}
 
-    try {
-      await loadOrdersFromBackend();
-      // You can optionally set placeholders for these fields
-      // if you don't have an endpoint to fetch user profile yet.
-      showMainApp();
-      showToast("Welcome back ✅", "success");
-    } catch (e) {
-      // Token invalid/expired -> force logout cleanly
-      logout();
-    }
+  currentUser = {
+    __backendId: String(savedUserId),
+    email: savedProfile?.email || "",
+    store_name: savedProfile?.store_name || "My Store",
+    currency: savedProfile?.currency || "EUR",
+    plan: savedProfile?.plan || "trial",
+    trial_ends: savedProfile?.trial_ends || new Date(Date.now() + 14 * 86400000).toISOString(),
+    subscription_status: savedProfile?.subscription_status || "active"
+  };
+
+  try {
+    await loadOrdersFromBackend();
+    showMainApp();
+    showToast("Loguil — Welcome back ✅", "success");
+  } catch (e) {
+    logout();
   }
+}
 
       
       if (window.elementSdk) {
