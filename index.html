@@ -1240,16 +1240,6 @@ localStorage.setItem("authToken", data.token);
       trial_ends: backendUser.trial_ends || fallbackTrialEnd,
       subscription_status: backendUser.subscription_status || "active"
     };
-
-  localStorage.setItem("currentUserProfile", JSON.stringify({
-  __backendId: currentUser.__backendId,
-  email: currentUser.email,
-  store_name: currentUser.store_name,
-  currency: currentUser.currency,
-  plan: currentUser.plan,
-  trial_ends: currentUser.trial_ends,
-  subscription_status: currentUser.subscription_status
-}));
    
  // SAVE FULL USER PROFILE FOR PAGE REFRESH
 localStorage.setItem("currentUserProfile", JSON.stringify({
@@ -1262,9 +1252,10 @@ localStorage.setItem("currentUserProfile", JSON.stringify({
   subscription_status: currentUser.subscription_status
 }));
 
-    localStorage.setItem("currentUserId", currentUser.__backendId);
-    localStorage.removeItem("pendingStoreName");
-    localStorage.removeItem("pendingCurrency");
+   localStorage.setItem("currentUserId", currentUser.__backendId);
+   localStorage.setItem("currentUser", JSON.stringify(currentUser));
+   localStorage.removeItem("pendingStoreName");
+   localStorage.removeItem("pendingCurrency");
 
     showMainApp();
 showToast("Login successful!", "success");
