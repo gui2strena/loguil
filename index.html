@@ -423,18 +423,13 @@ const API_BASE = "https://loguil-backend.onrender.com";
 async function api(path, options = {}) {
   const token = localStorage.getItem("authToken");
 
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {})
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   const resp = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
   });
 
   let data = {};
@@ -1223,13 +1218,14 @@ async function handleLogin(e) {
     });
 
     const data = await resp.json();
-    localStorage.setItem("authToken", data.token);
 
+if (!resp.ok) {
+  showToast(data.error || "Login failed", "error");
+  return;
+}
 
-    if (!resp.ok) {
-      showToast(data.error || "Login failed", "error");
-      return;
-    }
+localStorage.setItem("authToken", data.token);
+
 
     const backendUser = data.user;
 
@@ -1982,6 +1978,26 @@ async function handleChangePassword(e) {
     // ============================================================================
     async function init() {
       render();
+
+       // Auto-login after refresh
+  const savedUserId = localStorage.getItem("currentUserId");
+  const token = localStorage.getItem("authToken");
+
+  if (savedUserId && token) {
+    currentUser = { __backendId: String(savedUserId) };
+
+    try {
+      await loadOrdersFromBackend();
+      // You can optionally set placeholders for these fields
+      // if you don't have an endpoint to fetch user profile yet.
+      showMainApp();
+      showToast("Welcome back ✅", "success");
+    } catch (e) {
+      // Token invalid/expired -> force logout cleanly
+      logout();
+    }
+  }
+
       
       if (window.elementSdk) {
         window.elementSdk.init({
