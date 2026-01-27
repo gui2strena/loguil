@@ -1316,11 +1316,43 @@ async function handleRegister(e) {
    
   function logout() {
   currentUser = null;
-  localStorage.removeItem("currentUserId");
+
   localStorage.removeItem("authToken");
+  localStorage.removeItem("currentUserId");
   localStorage.removeItem("currentUserProfile");
+  localStorage.removeItem("currentUser");
+
   render();
   showToast(EN.nav.logoutSuccess, "info");
+}
+
+   function isSessionValid() {
+  const token = localStorage.getItem("authToken");
+  const profileRaw = localStorage.getItem("currentUserProfile");
+
+  if (!token || !profileRaw) return false;
+
+  try {
+    const p = JSON.parse(profileRaw);
+    if (!p || !p.__backendId || !p.email) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function guardSessionOrLogout() {
+  if (isSessionValid()) return;
+
+  // Clean and force back to auth screen
+  localStorage.removeItem("authToken");
+  localStorage.removeItem("currentUserId");
+  localStorage.removeItem("currentUserProfile");
+  localStorage.removeItem("currentUser");
+
+  currentUser = null;
+  render();
+  showToast("Session expired. Please login again.", "info");
 }
 
    function openPasswordModal() {
@@ -1370,11 +1402,12 @@ async function handleChangePassword(e) {
 }
 
     function showMainApp() {
-      render();
-      updateSubscriptionStatus();
-      updateDashboard();
-      showView('dashboard');
-    }
+  guardSessionOrLogout(); // ✅ NEW: block access if session missing
+  render();
+  updateSubscriptionStatus();
+  updateDashboard();
+  showView('dashboard');
+}
 
     // ============================================================================
     // SUBSCRIPTION MANAGEMENT
@@ -1496,6 +1529,9 @@ async function handleChangePassword(e) {
     // VIEW MANAGEMENT
     // ============================================================================
     function showView(view) {
+     guardSessionOrLogout();
+      if (!currentUser) return;
+
       document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
       document.getElementById('view-orders').classList.toggle('hidden', view !== 'orders');
       document.getElementById('view-subscription').classList.toggle('hidden', view !== 'subscription');
