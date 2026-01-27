@@ -421,9 +421,20 @@
 const API_BASE = "https://loguil-backend.onrender.com";
 
 async function api(path, options = {}) {
+  const token = localStorage.getItem("authToken");
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options
+    ...options,
+    headers
   });
 
   let data = {};
@@ -1295,12 +1306,13 @@ async function handleRegister(e) {
   }
 }
    
-    function logout() {
-      currentUser = null;
-      localStorage.removeItem('currentUserId');
-      render();
-      showToast(EN.nav.logoutSuccess, 'info');
-    }
+   function logout() {
+  currentUser = null;
+  localStorage.removeItem("currentUserId");
+  localStorage.removeItem("authToken");
+  render();
+  showToast(EN.nav.logoutSuccess, "info");
+}
 
    function openPasswordModal() {
   const m = document.getElementById("password-modal");
