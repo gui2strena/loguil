@@ -29,205 +29,16 @@ app.use(
 // -------------------- STRIPE (Webhook needs raw body) --------------------
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
-
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
-
-// IMPORTANT: Webhook must be registered BEFORE express.json()
-// so Stripe can validate signature using the raw body.
-app.post(
-  "/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    try {
-      if (!stripe) return res.status(400).send("Stripe not configured");
-      if (!STRIPE_WEBHOOK_SECRET) return res.status(400).send("Webhook secret missing");
-
-      const sig = req.headers["stripe-signature"];
-      if (!sig) return res.status(400).send("Missing stripe-signature");
-
-      let event;
-      try {
-        event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-      } catch (err) {
-        return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
-      }
-
-      // Handle events
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-
-        const userId = Number(session?.metadata?.userId);
-        const plan = (session?.metadata?.plan || "").toString();
-        const customerId = session.customer;
-        const subscriptionId = session.subscription;
-
-        if (Number.isFinite(userId) && plan) {
-          await updateUserBillingFromStripe({
-            userId,
-            plan,
-            subscription_status: "active",
-            stripe_customer_id: customerId || "",
-            stripe_subscription_id: subscriptionId || "",
-          });
-        }
-      }
-
-      if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
-        const sub = event.data.object;
-        const customerId = sub.customer;
-        const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
-
-        // If you want stricter mapping, you can refine this later.
-        const subscription_status =
-          status === "active" || status === "trialing" ? "active" : "inactive";
-
-        await updateUserBillingByCustomerId({
-          stripe_customer_id: customerId || "",
-          subscription_status,
-          stripe_subscription_id: sub.id || "",
-        });
-      }
-
-      return res.json({ received: true });
-    } catch (err) {
-      return res.status(500).send(err.message || "Webhook error");
-    }
-  }
-);
-
-// -------------------- STRIPE WEBHOOK (must be BEFORE express.json) --------------------
-app.post("/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  try {
-    if (!stripe) return res.status(400).send("Stripe not configured");
-
-    const sig = req.headers["stripe-signature"];
-    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
-
-    let event;
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-    } catch (err) {
-      console.log("⚠️ Webhook signature verification failed:", err.message);
-      return res.sendStatus(400);
-    }
-
-    // Handle events
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object;
-
-        // We set metadata in checkout session creation: userId + plan
-        const userId = Number(session?.metadata?.userId || 0);
-        const plan = String(session?.metadata?.plan || "");
-
-        const stripeCustomerId = session.customer ? String(session.customer) : "";
-        const stripeSubscriptionId = session.subscription ? String(session.subscription) : "";
-
-        if (userId && plan) {
-          // TODO: update user in DB
-          // Example fields: plan, subscription_status, stripe_customer_id, stripe_subscription_id
-          await setUserPlanInDb(userId, {
-            plan,
-            subscription_status: "active",
-            stripe_customer_id: stripeCustomerId,
-            stripe_subscription_id: stripeSubscriptionId,
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.created":
-      case "customer.subscription.updated": {
-        const sub = event.data.object;
-
-        // Optional: keep status synced (active, past_due, canceled, etc.)
-        // If you store stripe_subscription_id in DB, you can map it back to user.
-        await syncSubscriptionStatusInDb(String(sub.id), String(sub.status || ""));
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const sub = event.data.object;
-        await syncSubscriptionStatusInDb(String(sub.id), "cancelled");
-        break;
-      }
-
-      default:
-        // ignore unhandled events
-        break;
-    }
-
-    return res.sendStatus(200);
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return res.sendStatus(500);
-  }
-});
-
-// Now we can parse JSON normally for the rest of the app
-app.use(express.json());
-
-// -------------------- JWT --------------------
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
-const JWT_EXPIRES_IN = "7d";
-
-function signToken(user) {
-  return jwt.sign(
-    { userId: Number(user.id), email: user.email },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
-  );
-}
-
-function requireAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization || "";
-    const [type, token] = auth.split(" ");
-
-    if (type !== "Bearer" || !token) {
-      return res.status(401).json({ error: "Missing token" });
-    }
-
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.auth = payload;
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token" });
-  }
-}
 
 // -------------------- DB (optional but preferred) --------------------
 const hasDb = !!process.env.DATABASE_URL && !!Pool;
+
 const pool = hasDb
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
     })
-  async function setUserPlanInDb(userId, data) {
-  const { plan, subscription_status, stripe_customer_id, stripe_subscription_id } = data;
-
-  await pool.query(
-    `UPDATE users
-     SET plan = $1,
-         subscription_status = $2,
-         stripe_customer_id = $3,
-         stripe_subscription_id = $4
-     WHERE id = $5`,
-    [plan, subscription_status, stripe_customer_id, stripe_subscription_id, userId]
-  );
-}
-
-async function syncSubscriptionStatusInDb(stripeSubscriptionId, status) {
-  if (!stripeSubscriptionId) return;
-
-  await pool.query(
-    `UPDATE users
-     SET subscription_status = $1
-     WHERE stripe_subscription_id = $2`,
-    [status, stripeSubscriptionId]
-  );
-}
-  
   : null;
 
 // fallback memory (if DB missing)
@@ -264,72 +75,6 @@ function assertAuthMatches(req, res, userIdNum) {
   }
   return true;
 }
-
-// -------------------- DB init --------------------
-async function ensureTables() {
-  if (!pool) return;
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      store_name TEXT NOT NULL,
-      currency TEXT NOT NULL,
-      plan TEXT NOT NULL DEFAULT 'trial',
-      trial_ends TIMESTAMPTZ NOT NULL
-    );
-  `);
-
-  // Add billing columns safely (for existing DBs)
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT DEFAULT '';`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT DEFAULT '';`);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      order_id TEXT NOT NULL,
-      order_date DATE NOT NULL,
-      customer_name TEXT,
-      product_name TEXT,
-      revenue NUMERIC DEFAULT 0,
-      product_cost NUMERIC DEFAULT 0,
-      shipping_cost NUMERIC DEFAULT 0,
-      platform_fee NUMERIC DEFAULT 0,
-      other_costs NUMERIC DEFAULT 0,
-      status TEXT DEFAULT 'pending',
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_orders_user_created
-    ON orders (user_id, created_at DESC);
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS password_resets (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token TEXT UNIQUE NOT NULL,
-      expires_at TIMESTAMPTZ NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_password_resets_user
-    ON password_resets (user_id);
-  `);
-}
-
-// run at startup
-ensureTables().catch((err) =>
-  console.error("DB init error:", err.message || err)
-);
 
 // -------------------- billing helpers --------------------
 async function updateUserBillingFromStripe({
@@ -396,6 +141,160 @@ async function updateUserBillingByCustomerId({
   u.stripe_subscription_id = String(stripe_subscription_id || "");
 }
 
+// -------------------- STRIPE WEBHOOK (MUST be BEFORE express.json) --------------------
+app.post("/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    if (!stripe) return res.status(400).send("Stripe not configured");
+    if (!STRIPE_WEBHOOK_SECRET) return res.status(400).send("Webhook secret missing");
+
+    const sig = req.headers["stripe-signature"];
+    if (!sig) return res.status(400).send("Missing stripe-signature");
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
+    }
+
+    // Handle events
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+
+      const userId = Number(session?.metadata?.userId);
+      const plan = (session?.metadata?.plan || "").toString();
+      const customerId = session.customer;
+      const subscriptionId = session.subscription;
+
+      if (Number.isFinite(userId) && plan) {
+        await updateUserBillingFromStripe({
+          userId,
+          plan,
+          subscription_status: "active",
+          stripe_customer_id: customerId || "",
+          stripe_subscription_id: subscriptionId || "",
+        });
+      }
+    }
+
+    if (
+      event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted"
+    ) {
+      const sub = event.data.object;
+      const customerId = sub.customer;
+      const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
+
+      const subscription_status =
+        status === "active" || status === "trialing" ? "active" : "inactive";
+
+      await updateUserBillingByCustomerId({
+        stripe_customer_id: customerId || "",
+        subscription_status,
+        stripe_subscription_id: sub.id || "",
+      });
+    }
+
+    return res.json({ received: true });
+  } catch (err) {
+    return res.status(500).send(err.message || "Webhook error");
+  }
+});
+
+// Now we can parse JSON normally for the rest of the app
+app.use(express.json());
+
+// -------------------- JWT --------------------
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const JWT_EXPIRES_IN = "7d";
+
+function signToken(user) {
+  return jwt.sign({ userId: Number(user.id), email: user.email }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const [type, token] = auth.split(" ");
+
+    if (type !== "Bearer" || !token) {
+      return res.status(401).json({ error: "Missing token" });
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.auth = payload;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+// -------------------- DB init --------------------
+async function ensureTables() {
+  if (!pool) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      store_name TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      plan TEXT NOT NULL DEFAULT 'trial',
+      trial_ends TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  // Add billing columns safely (for existing DBs)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT DEFAULT '';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT DEFAULT '';`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      order_id TEXT NOT NULL,
+      order_date DATE NOT NULL,
+      customer_name TEXT,
+      product_name TEXT,
+      revenue NUMERIC DEFAULT 0,
+      product_cost NUMERIC DEFAULT 0,
+      shipping_cost NUMERIC DEFAULT 0,
+      platform_fee NUMERIC DEFAULT 0,
+      other_costs NUMERIC DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_created
+    ON orders (user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user
+    ON password_resets (user_id);
+  `);
+}
+
+// run at startup
+ensureTables().catch((err) => console.error("DB init error:", err.message || err));
+
 // -------------------- health --------------------
 app.get("/", (req, res) => {
   res.json({ status: "ok", app: "Loguil", db: !!pool });
@@ -448,9 +347,7 @@ app.post("/signup", async (req, res) => {
 
     if (pool) {
       const existing = await pool.query("SELECT id FROM users WHERE email=$1", [emailNorm]);
-      if (existing.rows.length) {
-        return res.status(400).json({ error: "Email already registered" });
-      }
+      if (existing.rows.length) return res.status(400).json({ error: "Email already registered" });
 
       const created = await pool.query(
         `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends, subscription_status, stripe_customer_id, stripe_subscription_id)
@@ -496,9 +393,7 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing credentials" });
-    }
+    if (!email || !password) return res.status(400).json({ error: "Missing credentials" });
 
     const emailNorm = String(email).toLowerCase().trim();
 
@@ -649,7 +544,8 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
     if (!assertAuthMatches(req, res, userIdNum)) return;
     if (!plan) return res.status(400).json({ error: "Missing plan" });
 
-    const PRICE_STARTER = process.env.STRIPE_PRICE_STARTER || process.env.STRIPE_PRICE_BASIC || "";
+    const PRICE_STARTER =
+      process.env.STRIPE_PRICE_STARTER || process.env.STRIPE_PRICE_BASIC || "";
     const PRICE_PRO = process.env.STRIPE_PRICE_PRO || "";
     const PRICE_GROWTH = process.env.STRIPE_PRICE_GROWTH || "";
 
@@ -659,11 +555,8 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
       plan === "growth" ? PRICE_GROWTH :
       "";
 
-    if (!priceId) {
-      return res.status(400).json({ error: "Price not configured for this plan" });
-    }
+    if (!priceId) return res.status(400).json({ error: "Price not configured for this plan" });
 
-    // URLs (you can keep it simple: send user back to frontend root)
     const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
