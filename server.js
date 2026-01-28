@@ -95,6 +95,75 @@ app.post(
   }
 );
 
+// -------------------- STRIPE WEBHOOK (must be BEFORE express.json) --------------------
+app.post("/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    if (!stripe) return res.status(400).send("Stripe not configured");
+
+    const sig = req.headers["stripe-signature"];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    } catch (err) {
+      console.log("⚠️ Webhook signature verification failed:", err.message);
+      return res.sendStatus(400);
+    }
+
+    // Handle events
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object;
+
+        // We set metadata in checkout session creation: userId + plan
+        const userId = Number(session?.metadata?.userId || 0);
+        const plan = String(session?.metadata?.plan || "");
+
+        const stripeCustomerId = session.customer ? String(session.customer) : "";
+        const stripeSubscriptionId = session.subscription ? String(session.subscription) : "";
+
+        if (userId && plan) {
+          // TODO: update user in DB
+          // Example fields: plan, subscription_status, stripe_customer_id, stripe_subscription_id
+          await setUserPlanInDb(userId, {
+            plan,
+            subscription_status: "active",
+            stripe_customer_id: stripeCustomerId,
+            stripe_subscription_id: stripeSubscriptionId,
+          });
+        }
+        break;
+      }
+
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const sub = event.data.object;
+
+        // Optional: keep status synced (active, past_due, canceled, etc.)
+        // If you store stripe_subscription_id in DB, you can map it back to user.
+        await syncSubscriptionStatusInDb(String(sub.id), String(sub.status || ""));
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const sub = event.data.object;
+        await syncSubscriptionStatusInDb(String(sub.id), "cancelled");
+        break;
+      }
+
+      default:
+        // ignore unhandled events
+        break;
+    }
+
+    return res.sendStatus(200);
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return res.sendStatus(500);
+  }
+});
+
 // Now we can parse JSON normally for the rest of the app
 app.use(express.json());
 
@@ -134,6 +203,31 @@ const pool = hasDb
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
     })
+  async function setUserPlanInDb(userId, data) {
+  const { plan, subscription_status, stripe_customer_id, stripe_subscription_id } = data;
+
+  await pool.query(
+    `UPDATE users
+     SET plan = $1,
+         subscription_status = $2,
+         stripe_customer_id = $3,
+         stripe_subscription_id = $4
+     WHERE id = $5`,
+    [plan, subscription_status, stripe_customer_id, stripe_subscription_id, userId]
+  );
+}
+
+async function syncSubscriptionStatusInDb(stripeSubscriptionId, status) {
+  if (!stripeSubscriptionId) return;
+
+  await pool.query(
+    `UPDATE users
+     SET subscription_status = $1
+     WHERE stripe_subscription_id = $2`,
+    [status, stripeSubscriptionId]
+  );
+}
+  
   : null;
 
 // fallback memory (if DB missing)
@@ -555,7 +649,7 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
     if (!assertAuthMatches(req, res, userIdNum)) return;
     if (!plan) return res.status(400).json({ error: "Missing plan" });
 
-    const PRICE_STARTER = process.env.STRIPE_PRICE_STARTER || "";
+    const PRICE_STARTER = process.env.STRIPE_PRICE_STARTER || process.env.STRIPE_PRICE_BASIC || "";
     const PRICE_PRO = process.env.STRIPE_PRICE_PRO || "";
     const PRICE_GROWTH = process.env.STRIPE_PRICE_GROWTH || "";
 
