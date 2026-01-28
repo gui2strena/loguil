@@ -424,12 +424,12 @@ async function api(path, options = {}) {
   const token = localStorage.getItem("authToken");
 
   const resp = await fetch(`${API_BASE}${path}`, {
-    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {})
-    }
+    },
+    ...options
   });
 
   let data = {};
@@ -1472,22 +1472,27 @@ async function handleChangePassword(e) {
     }
 
     async function subscribeToPlan(plan) {
-      showToast(EN.subscription.stripeInDev, 'info');
-      showToast(EN.subscription.prototypeNotice, 'info');
-      
-      const updatedUser = {
-        ...currentUser,
-        plan: plan,
-        subscription_status: 'active',
-        stripe_customer_id: 'demo_customer_id',
-        stripe_subscription_id: 'demo_subscription_id'
-      };
+  try {
+    showToast("Redirecting to secure checkout...", "info");
 
-      const result = await window.dataSdk.update(updatedUser);
-      if (result.isOk) {
-        showToast(`${plan.toUpperCase()} ${EN.subscription.planActivated}`, 'success');
-      }
+    const data = await api("/create-checkout-session", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: currentUser.__backendId,
+        plan
+      })
+    });
+
+    if (!data?.url) {
+      showToast("Checkout unavailable. Please try again.", "error");
+      return;
     }
+
+    window.location.href = data.url;
+  } catch (err) {
+    showToast(err.message || "Billing error", "error");
+  }
+}
 
     async function cancelSubscription() {
       const confirmation = document.createElement('div');
