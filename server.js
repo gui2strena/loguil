@@ -1,9 +1,12 @@
-// server.js — Loguil Backend (Users + Orders + Change Password) — Postgres (optional) + Memory fallback
+// server.js — Loguil Backend (Users + Orders + Password + Stripe Billing)
+// Postgres (optional) + Memory fallback
+
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const Stripe = require("stripe");
 
 let Pool;
 try {
@@ -15,14 +18,114 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// -------------------- middleware --------------------
+// -------------------- CORS --------------------
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || "*",
     credentials: false,
   })
 );
+
+// -------------------- STRIPE (Webhook needs raw body) --------------------
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+
+// IMPORTANT: Webhook must be registered BEFORE express.json()
+// so Stripe can validate signature using the raw body.
+app.post(
+  "/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    try {
+      if (!stripe) return res.status(400).send("Stripe not configured");
+      if (!STRIPE_WEBHOOK_SECRET) return res.status(400).send("Webhook secret missing");
+
+      const sig = req.headers["stripe-signature"];
+      if (!sig) return res.status(400).send("Missing stripe-signature");
+
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+      } catch (err) {
+        return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
+      }
+
+      // Handle events
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+
+        const userId = Number(session?.metadata?.userId);
+        const plan = (session?.metadata?.plan || "").toString();
+        const customerId = session.customer;
+        const subscriptionId = session.subscription;
+
+        if (Number.isFinite(userId) && plan) {
+          await updateUserBillingFromStripe({
+            userId,
+            plan,
+            subscription_status: "active",
+            stripe_customer_id: customerId || "",
+            stripe_subscription_id: subscriptionId || "",
+          });
+        }
+      }
+
+      if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+        const sub = event.data.object;
+        const customerId = sub.customer;
+        const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
+
+        // If you want stricter mapping, you can refine this later.
+        const subscription_status =
+          status === "active" || status === "trialing" ? "active" : "inactive";
+
+        await updateUserBillingByCustomerId({
+          stripe_customer_id: customerId || "",
+          subscription_status,
+          stripe_subscription_id: sub.id || "",
+        });
+      }
+
+      return res.json({ received: true });
+    } catch (err) {
+      return res.status(500).send(err.message || "Webhook error");
+    }
+  }
+);
+
+// Now we can parse JSON normally for the rest of the app
 app.use(express.json());
+
+// -------------------- JWT --------------------
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const JWT_EXPIRES_IN = "7d";
+
+function signToken(user) {
+  return jwt.sign(
+    { userId: Number(user.id), email: user.email },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const [type, token] = auth.split(" ");
+
+    if (type !== "Bearer" || !token) {
+      return res.status(401).json({ error: "Missing token" });
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.auth = payload;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
 
 // -------------------- DB (optional but preferred) --------------------
 const hasDb = !!process.env.DATABASE_URL && !!Pool;
@@ -35,7 +138,7 @@ const pool = hasDb
 
 // fallback memory (if DB missing)
 const mem = {
-  users: [],  // {id,email,password_hash,store_name,currency,plan,trial_ends}
+  users: [], // {id,email,password_hash,store_name,currency,plan,trial_ends,subscription_status,stripe_customer_id,stripe_subscription_id}
   orders: [], // {id,user_id,...,created_at}
 };
 
@@ -56,65 +159,12 @@ async function userExists(userIdNum) {
   return mem.users.some((u) => Number(u.id) === userIdNum);
 }
 
-// -------------------- JWT --------------------
-// IMPORTANT: set JWT_SECRET in Render Environment for production.
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
-const JWT_EXPIRES_IN = "7d";
-
-function signToken(user) {
-  return jwt.sign(
-    { userId: Number(user.id), email: String(user.email || "") },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
-  );
-}
-
-/**
- * Accept token from:
- * - Authorization: Bearer <token>
- * - x-auth-token: <token>
- * - ?token=<token>
- * - body.token
- */
-function extractToken(req) {
-  const auth = String(req.headers.authorization || "").trim();
-  if (auth) {
-    const [type, token] = auth.split(" ");
-    if (type === "Bearer" && token) return token.trim();
-  }
-
-  const x = String(req.headers["x-auth-token"] || "").trim();
-  if (x) return x;
-
-  const q = String(req.query.token || "").trim();
-  if (q) return q;
-
-  const b = String(req.body?.token || "").trim();
-  if (b) return b;
-
-  return "";
-}
-
-function requireAuth(req, res, next) {
-  try {
-    const token = extractToken(req);
-    if (!token) return res.status(401).json({ error: "Missing token" });
-
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.auth = payload; // { userId, email, iat, exp }
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token" });
-  }
-}
-
 function assertAuthMatches(req, res, userIdNum) {
-  const tokenUserId = Number(req.auth?.userId);
-  if (!Number.isFinite(tokenUserId)) {
+  if (!req.auth || !Number.isFinite(Number(req.auth.userId))) {
     res.status(401).json({ error: "Invalid token" });
     return false;
   }
-  if (tokenUserId !== userIdNum) {
+  if (Number(req.auth.userId) !== userIdNum) {
     res.status(403).json({ error: "Forbidden" });
     return false;
   }
@@ -136,6 +186,11 @@ async function ensureTables() {
       trial_ends TIMESTAMPTZ NOT NULL
     );
   `);
+
+  // Add billing columns safely (for existing DBs)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT DEFAULT '';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT DEFAULT '';`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -161,7 +216,6 @@ async function ensureTables() {
     ON orders (user_id, created_at DESC);
   `);
 
-  // Optional table for future reset-password flow
   await pool.query(`
     CREATE TABLE IF NOT EXISTS password_resets (
       id SERIAL PRIMARY KEY,
@@ -178,7 +232,75 @@ async function ensureTables() {
   `);
 }
 
-ensureTables().catch((err) => console.error("DB init error:", err.message || err));
+// run at startup
+ensureTables().catch((err) =>
+  console.error("DB init error:", err.message || err)
+);
+
+// -------------------- billing helpers --------------------
+async function updateUserBillingFromStripe({
+  userId,
+  plan,
+  subscription_status,
+  stripe_customer_id,
+  stripe_subscription_id,
+}) {
+  if (!Number.isFinite(Number(userId))) return;
+
+  if (pool) {
+    await pool.query(
+      `UPDATE users
+       SET plan=$1,
+           subscription_status=$2,
+           stripe_customer_id=$3,
+           stripe_subscription_id=$4
+       WHERE id=$5`,
+      [
+        String(plan),
+        String(subscription_status || "active"),
+        String(stripe_customer_id || ""),
+        String(stripe_subscription_id || ""),
+        Number(userId),
+      ]
+    );
+    return;
+  }
+
+  const u = mem.users.find((x) => Number(x.id) === Number(userId));
+  if (!u) return;
+  u.plan = String(plan);
+  u.subscription_status = String(subscription_status || "active");
+  u.stripe_customer_id = String(stripe_customer_id || "");
+  u.stripe_subscription_id = String(stripe_subscription_id || "");
+}
+
+async function updateUserBillingByCustomerId({
+  stripe_customer_id,
+  subscription_status,
+  stripe_subscription_id,
+}) {
+  if (!stripe_customer_id) return;
+
+  if (pool) {
+    await pool.query(
+      `UPDATE users
+       SET subscription_status=$1,
+           stripe_subscription_id=$2
+       WHERE stripe_customer_id=$3`,
+      [
+        String(subscription_status || "active"),
+        String(stripe_subscription_id || ""),
+        String(stripe_customer_id || ""),
+      ]
+    );
+    return;
+  }
+
+  const u = mem.users.find((x) => x.stripe_customer_id === stripe_customer_id);
+  if (!u) return;
+  u.subscription_status = String(subscription_status || "active");
+  u.stripe_subscription_id = String(stripe_subscription_id || "");
+}
 
 // -------------------- health --------------------
 app.get("/", (req, res) => {
@@ -237,14 +359,15 @@ app.post("/signup", async (req, res) => {
       }
 
       const created = await pool.query(
-        `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends)
-         VALUES ($1,$2,$3,$4,'trial',$5)
-         RETURNING id,email,store_name,currency,plan,trial_ends`,
+        `INSERT INTO users (email, password_hash, store_name, currency, plan, trial_ends, subscription_status, stripe_customer_id, stripe_subscription_id)
+         VALUES ($1,$2,$3,$4,'trial',$5,'active','','')
+         RETURNING id,email,store_name,currency,plan,trial_ends,subscription_status,stripe_customer_id,stripe_subscription_id`,
         [emailNorm, password_hash, String(storeName), String(currency), trial_ends]
       );
 
-      // You can auto-login after signup by returning a token here if you want.
-      return res.json({ success: true, user: created.rows[0] });
+      const user = created.rows[0];
+      const token = signToken(user);
+      return res.json({ success: true, user, token });
     }
 
     // memory fallback
@@ -259,12 +382,16 @@ app.post("/signup", async (req, res) => {
       currency: String(currency),
       plan: "trial",
       trial_ends,
+      subscription_status: "active",
+      stripe_customer_id: "",
+      stripe_subscription_id: "",
     };
     mem.users.push(user);
 
     const safe = { ...user };
     delete safe.password_hash;
-    return res.json({ success: true, user: safe });
+    const token = signToken(safe);
+    return res.json({ success: true, user: safe, token });
   } catch (err) {
     console.error("POST /signup error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
@@ -283,7 +410,7 @@ app.post("/login", async (req, res) => {
 
     if (pool) {
       const found = await pool.query(
-        "SELECT id,email,password_hash,store_name,currency,plan,trial_ends FROM users WHERE email=$1",
+        "SELECT id,email,password_hash,store_name,currency,plan,trial_ends,subscription_status,stripe_customer_id,stripe_subscription_id FROM users WHERE email=$1",
         [emailNorm]
       );
       if (!found.rows.length) return res.status(404).json({ error: "User not found" });
@@ -315,8 +442,6 @@ app.post("/login", async (req, res) => {
 });
 
 // -------------------- change password --------------------
-// contract: POST /change-password { userId, currentPassword, newPassword }
-// Requires Authorization: Bearer <token>
 app.post("/change-password", requireAuth, async (req, res) => {
   try {
     const userIdNum = toInt(req.body?.userId);
@@ -345,7 +470,6 @@ app.post("/change-password", requireAuth, async (req, res) => {
       return res.json({ success: true });
     }
 
-    // memory mode
     const u = mem.users.find((x) => Number(x.id) === userIdNum);
     if (!u) return res.status(404).json({ error: "User not found" });
 
@@ -360,14 +484,115 @@ app.post("/change-password", requireAuth, async (req, res) => {
   }
 });
 
-// -------------------- orders --------------------
-// IMPORTANT CONTRACTS (match frontend patterns):
-// - POST   /orders        body: { userId, order }   (requires token)
-// - GET    /orders?userId=123                      (requires token)
-// - PUT    /orders/:id    body: { userId, order }   (requires token)
-// - DELETE /orders/:id?userId=123                  (requires token)
+// -------------------- forgot/reset password (DB only) --------------------
+app.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Missing email" });
 
-// POST /orders  body: { userId, order }
+    const emailNorm = String(email).toLowerCase().trim();
+    if (!pool) return res.status(400).json({ error: "Password reset requires DB" });
+
+    const found = await pool.query("SELECT id FROM users WHERE email=$1", [emailNorm]);
+    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+    const userId = found.rows[0].id;
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
+
+    await pool.query("DELETE FROM password_resets WHERE user_id=$1", [userId]);
+    await pool.query(
+      "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1,$2,$3)",
+      [userId, token, expiresAt]
+    );
+
+    return res.json({ success: true, token });
+  } catch (err) {
+    console.error("POST /forgot-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+app.post("/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword) return res.status(400).json({ error: "Missing token or newPassword" });
+    if (!pool) return res.status(400).json({ error: "Password reset requires DB" });
+    if (String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+
+    const tokenNorm = String(token).trim();
+    const row = await pool.query(
+      `SELECT user_id, expires_at FROM password_resets WHERE token=$1 LIMIT 1`,
+      [tokenNorm]
+    );
+    if (!row.rows.length) return res.status(400).json({ error: "Invalid token" });
+
+    const { user_id, expires_at } = row.rows[0];
+    if (Date.now() > new Date(expires_at).getTime()) return res.status(400).json({ error: "Token expired" });
+
+    const password_hash = await bcrypt.hash(String(newPassword), 10);
+    await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [password_hash, user_id]);
+    await pool.query("DELETE FROM password_resets WHERE token=$1", [tokenNorm]);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("POST /reset-password error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// -------------------- STRIPE: checkout --------------------
+// contract: POST /create-checkout-session  { userId, plan }
+// Requires Bearer token
+app.post("/create-checkout-session", requireAuth, async (req, res) => {
+  try {
+    if (!stripe) return res.status(400).json({ error: "Stripe not configured" });
+
+    const userIdNum = toInt(req.body?.userId);
+    const plan = (req.body?.plan || "").toString().trim(); // starter | pro | growth
+
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
+    if (!assertAuthMatches(req, res, userIdNum)) return;
+    if (!plan) return res.status(400).json({ error: "Missing plan" });
+
+    const PRICE_STARTER = process.env.STRIPE_PRICE_STARTER || "";
+    const PRICE_PRO = process.env.STRIPE_PRICE_PRO || "";
+    const PRICE_GROWTH = process.env.STRIPE_PRICE_GROWTH || "";
+
+    const priceId =
+      plan === "starter" ? PRICE_STARTER :
+      plan === "pro" ? PRICE_PRO :
+      plan === "growth" ? PRICE_GROWTH :
+      "";
+
+    if (!priceId) {
+      return res.status(400).json({ error: "Price not configured for this plan" });
+    }
+
+    // URLs (you can keep it simple: send user back to frontend root)
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${FRONTEND_URL}?checkout=success`,
+      cancel_url: `${FRONTEND_URL}?checkout=cancel`,
+      metadata: {
+        userId: String(userIdNum),
+        plan: String(plan),
+      },
+    });
+
+    return res.json({ success: true, url: session.url });
+  } catch (err) {
+    console.error("POST /create-checkout-session error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// -------------------- orders --------------------
+// POST /orders   body: { userId, order }
 app.post("/orders", requireAuth, async (req, res) => {
   try {
     const userIdNum = toInt(req.body?.userId);
@@ -378,17 +603,9 @@ app.post("/orders", requireAuth, async (req, res) => {
     if (!okUser) return res.status(404).json({ error: "User not found" });
 
     const order = req.body?.order;
-    if (!order || typeof order !== "object") {
-      return res.status(400).json({ error: "Missing order" });
-    }
-
-    if (!order.order_id || !String(order.order_id).trim()) {
-      return res.status(400).json({ error: "Missing order_id" });
-    }
-
-    if (!order.order_date || !String(order.order_date).trim()) {
-      return res.status(400).json({ error: "Missing order_date" });
-    }
+    if (!order || typeof order !== "object") return res.status(400).json({ error: "Missing order" });
+    if (!order.order_id || !String(order.order_id).trim()) return res.status(400).json({ error: "Missing order_id" });
+    if (!order.order_date || !String(order.order_date).trim()) return res.status(400).json({ error: "Missing order_date" });
 
     if (pool) {
       const created = await pool.query(
@@ -417,7 +634,6 @@ app.post("/orders", requireAuth, async (req, res) => {
       return res.json({ success: true, order: created.rows[0] });
     }
 
-    // memory fallback
     const newOrder = {
       id: Date.now(),
       user_id: userIdNum,
@@ -468,10 +684,7 @@ app.put("/orders/:id", requireAuth, async (req, res) => {
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!idNum) return res.status(400).json({ error: "Missing/invalid id" });
     if (!assertAuthMatches(req, res, userIdNum)) return;
-
-    if (!order || typeof order !== "object") {
-      return res.status(400).json({ error: "Missing order" });
-    }
+    if (!order || typeof order !== "object") return res.status(400).json({ error: "Missing order" });
 
     const okUser = await userExists(userIdNum);
     if (!okUser) return res.status(404).json({ error: "User not found" });
@@ -504,7 +717,6 @@ app.put("/orders/:id", requireAuth, async (req, res) => {
       return res.json({ success: true, order: updated.rows[0] });
     }
 
-    // memory fallback
     const idx = mem.orders.findIndex(
       (o) => Number(o.id) === idNum && Number(o.user_id) === userIdNum
     );
@@ -540,7 +752,6 @@ app.delete("/orders/:id", requireAuth, async (req, res) => {
       return res.json({ success: true });
     }
 
-    // memory fallback
     const before = mem.orders.length;
     mem.orders = mem.orders.filter(
       (o) => !(Number(o.id) === idNum && Number(o.user_id) === userIdNum)
