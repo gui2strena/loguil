@@ -578,6 +578,48 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
   }
 });
 
+// -------------------- STRIPE: cancel subscription --------------------
+// contract: POST /cancel-subscription  { userId }
+// Requires Bearer token
+app.post("/cancel-subscription", requireAuth, async (req, res) => {
+  try {
+    if (!stripe) return res.status(400).json({ error: "Stripe not configured" });
+
+    const userIdNum = toInt(req.body?.userId);
+    if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
+    if (!assertAuthMatches(req, res, userIdNum)) return;
+
+    // Load user from DB
+    if (!pool) return res.status(400).json({ error: "Cancel requires DB enabled" });
+
+    const found = await pool.query(
+      "SELECT stripe_subscription_id, stripe_customer_id FROM users WHERE id=$1",
+      [userIdNum]
+    );
+    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+    const subId = String(found.rows[0].stripe_subscription_id || "");
+    if (!subId) return res.status(400).json({ error: "No active subscription on user" });
+
+    // Cancel now (simple). If you prefer end of period: use { cancel_at_period_end: true }
+    await stripe.subscriptions.cancel(subId);
+
+    // Update DB immediately (webhook will also sync later)
+    await pool.query(
+      `UPDATE users
+       SET subscription_status='inactive',
+           plan='trial'
+       WHERE id=$1`,
+      [userIdNum]
+    );
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("POST /cancel-subscription error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
 // -------------------- orders --------------------
 // POST /orders   body: { userId, order }
 app.post("/orders", requireAuth, async (req, res) => {
