@@ -430,6 +430,51 @@ app.post("/login", async (req, res) => {
   }
 });
 
+app.get("/me", requireAuth, async (req, res) => {
+  try {
+    if (!pool) return res.status(400).json({ error: "DB required" });
+
+    const userId = Number(req.auth?.userId || 0);
+    const found = await pool.query(
+      "SELECT id,email,store_name,currency,plan,trial_ends,subscription_status,stripe_customer_id,stripe_subscription_id FROM users WHERE id=$1",
+      [userId]
+    );
+    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+    return res.json({ success: true, user: found.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+async function refreshUserFromBackend() {
+  const token = localStorage.getItem("authToken");
+  if (!token) return;
+
+  const res = await fetch(`${API_BASE_URL}/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "Failed to refresh user");
+
+  const u = data.user;
+
+  // manter teu formato
+  currentUser = {
+    __backendId: String(u.id),
+    email: u.email,
+    store_name: u.store_name,
+    currency: u.currency,
+    plan: u.plan,
+    trial_ends: u.trial_ends,
+    subscription_status: u.subscription_status,
+  };
+
+  localStorage.setItem("currentUserId", currentUser.__backendId);
+  localStorage.setItem("currentUserProfile", JSON.stringify(currentUser));
+  localStorage.setItem("currentUser", JSON.stringify(currentUser));
+}
+
 // -------------------- change password --------------------
 app.post("/change-password", requireAuth, async (req, res) => {
   try {
