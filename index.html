@@ -1341,6 +1341,44 @@ async function handleRegister(e) {
   }
 }
 
+// ===============================
+// BILLING – CANCEL SUBSCRIPTION
+// ===============================
+
+async function cancelCurrentPlan() {
+  try {
+    if (!currentUser || !currentUser.__backendId) {
+      alert("User not logged in");
+      return;
+    }
+
+    const token = localStorage.getItem("authToken");
+    const userId = Number(currentUser.__backendId);
+
+    const res = await fetch(`${API_BASE_URL}/cancel-subscription`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Cancel failed");
+
+    alert("Subscription cancelled");
+
+    // Atualiza user local
+    await refreshUserFromBackend();
+    renderPlansUI();
+
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "Cancel failed");
+  }
+}
+   
 function guardSessionOrLogout() {
   if (isSessionValid()) return;
 
