@@ -602,14 +602,16 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
 
     if (!priceId) return res.status(400).json({ error: "Price not configured for this plan" });
 
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+    // ✅ Production: set FRONTEND_URL in Render (ex: https://loguil.onrender.com)
+    // Fallback to localhost only for local dev.
+    const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${FRONTEND_URL}?checkout=success`,
-      cancel_url: `${FRONTEND_URL}?checkout=cancel`,
+      success_url: `${FRONTEND_URL}/?checkout=success`,
+      cancel_url: `${FRONTEND_URL}/?checkout=cancel`,
       metadata: {
         userId: String(userIdNum),
         plan: String(plan),
