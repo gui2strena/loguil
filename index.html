@@ -1565,7 +1565,16 @@ async function handleChangePassword(e) {
       document.getElementById('current-plan-name').textContent = planNames[currentUser.plan];
       document.getElementById('usage-count').textContent = `${activeOrders.length} / ${limit}`;
 
-      
+      const newOrderBtn = document.getElementById('new-order-btn');
+
+    if (limit !== 999999 && activeOrders.length >= limit) {
+      newOrderBtn?.setAttribute('disabled', 'true');
+      newOrderBtn?.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+     newOrderBtn?.removeAttribute('disabled');
+     newOrderBtn?.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+     
       if (currentUser.plan === 'trial') {
         const trialEnd = new Date(currentUser.trial_ends);
         const daysLeft = Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24));
@@ -2049,7 +2058,10 @@ async function handleChangePassword(e) {
       const limit = PLAN_LIMITS[currentUser.plan] ?? 0;
 
       if (limit !== 999999 && activeOrders.length >= limit) {
-        showToast("Plan limit reached. Upgrade to add more orders.", "error");
+        showToast(`You have reached the limit of ${currentUser.plan.toUpperCase()} plan (${activeOrders.length}/${limit} orders). Please upgrade to continue.`,
+  "error"
+);
+
         return;
       }
     }
