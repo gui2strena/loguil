@@ -1613,7 +1613,9 @@ async function handleChangePassword(e) {
     });
 
     // Pull the real state from backend (DB was updated to trial)
-    await refreshUserFromServer();
+   await refreshUserFromServer();
+   window.location.reload();
+
 
     showToast(EN.subscription.subscriptionCancelled, "info");
   } catch (err) {
