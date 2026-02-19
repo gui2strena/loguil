@@ -447,6 +447,27 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function fetchMe() {
+  const data = await api("/me", { method: "GET" });
+  return data?.user;
+}
+
+async function refreshUserFromServer() {
+  const serverUser = await fetchMe();
+  if (!serverUser) return;
+
+  currentUser = {
+    ...currentUser,
+    plan: serverUser.plan,
+    subscription_status: serverUser.subscription_status,
+    trial_ends: serverUser.trial_ends,
+    stripe_subscription_id: serverUser.stripe_subscription_id,
+    stripe_customer_id: serverUser.stripe_customer_id
+  };
+
+  updateSubscriptionStatus();
+}
+   
 async function loadOrdersFromBackend() {
   if (!currentUser?.__backendId) return;
 
