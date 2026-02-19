@@ -1603,42 +1603,19 @@ async function handleChangePassword(e) {
   document.getElementById('btn-cancel-yes').addEventListener('click', () => confirmCancellation(confirmation));
 }
 
-    window.confirmCancellation = async function(confirmationEl) {
+   window.confirmCancellation = async function(confirmationEl) {
   try {
-    // Remove confirmation modal
     confirmationEl?.remove();
 
-    // Call backend to cancel Stripe subscription
     await api("/cancel-subscription", {
       method: "POST",
-      body: JSON.stringify({
-        userId: currentUser.__backendId,
-        subscriptionId: currentUser.stripe_subscription_id
-      })
+      body: JSON.stringify({ userId: currentUser.__backendId })
     });
 
-    // Apply 7-day grace period in frontend state
-    const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + 7);
+    // Pull the real state from backend (DB was updated to trial)
+    await refreshUserFromServer();
 
-    const updatedUser = {
-      ...currentUser,
-      plan: "trial",
-      trial_ends: trialEnd.toISOString(),
-      subscription_status: "cancelled",
-      stripe_subscription_id: ""
-    };
-
-    const result = await window.dataSdk.update(updatedUser);
-
-    if (result.isOk) {
-      currentUser = updatedUser;
-      updateSubscriptionStatus();
-      showToast(EN.subscription.subscriptionCancelled, "info");
-    } else {
-      showToast("Failed to update subscription.", "error");
-    }
-
+    showToast(EN.subscription.subscriptionCancelled, "info");
   } catch (err) {
     showToast(err.message || "Subscription cancellation failed.", "error");
   }
