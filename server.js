@@ -447,34 +447,6 @@ app.get("/me", requireAuth, async (req, res) => {
   }
 });
 
-async function refreshUserFromBackend() {
-  const token = localStorage.getItem("authToken");
-  if (!token) return;
-
-  const res = await fetch(`${API_BASE_URL}/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "Failed to refresh user");
-
-  const u = data.user;
-
-  // manter teu formato
-  currentUser = {
-    __backendId: String(u.id),
-    email: u.email,
-    store_name: u.store_name,
-    currency: u.currency,
-    plan: u.plan,
-    trial_ends: u.trial_ends,
-    subscription_status: u.subscription_status,
-  };
-
-  localStorage.setItem("currentUserId", currentUser.__backendId);
-  localStorage.setItem("currentUserProfile", JSON.stringify(currentUser));
-  localStorage.setItem("currentUser", JSON.stringify(currentUser));
-}
-
 // -------------------- change password --------------------
 app.post("/change-password", requireAuth, async (req, res) => {
   try {
@@ -581,6 +553,7 @@ app.post("/reset-password", async (req, res) => {
 app.post("/create-checkout-session", requireAuth, async (req, res) => {
   try {
     if (!stripe) return res.status(400).json({ error: "Stripe not configured" });
+    if (!pool) return res.status(400).json({ error: "Checkout requires DB enabled" });
 
     const userIdNum = toInt(req.body?.userId);
     const plan = (req.body?.plan || "").toString().trim();
@@ -603,12 +576,41 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
 
     const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
+    // Load user billing data
+    const u = await pool.query(
+      "SELECT stripe_customer_id FROM users WHERE id=$1",
+      [userIdNum]
+    );
+    if (!u.rows.length) return res.status(404).json({ error: "User not found" });
+
+    const stripeCustomerId = String(u.rows[0].stripe_customer_id || "");
+
+    // Prevent multiple active subscriptions for the same customer
+    if (stripeCustomerId) {
+      const subs = await stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status: "all",
+        limit: 20,
+      });
+
+      const hasActive = subs.data.some(
+        (s) => s.status === "active" || s.status === "trialing"
+      );
+
+      if (hasActive) {
+        return res.status(400).json({
+          error: "You already have an active subscription. Please cancel it before subscribing again.",
+        });
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${FRONTEND_URL}/?checkout=success`,
       cancel_url: `${FRONTEND_URL}/?checkout=cancel`,
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
       metadata: {
         userId: String(userIdNum),
         plan: String(plan),
@@ -616,13 +618,11 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
     });
 
     return res.json({ success: true, url: session.url });
-
   } catch (err) {
     console.error("POST /create-checkout-session error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
   }
 });
-
 
 // -------------------- STRIPE: cancel subscription --------------------
 // contract: POST /cancel-subscription  { userId }
@@ -630,41 +630,53 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
 app.post("/cancel-subscription", requireAuth, async (req, res) => {
   try {
     if (!stripe) return res.status(400).json({ error: "Stripe not configured" });
+    if (!pool) return res.status(400).json({ error: "Cancel requires DB enabled" });
 
     const userIdNum = toInt(req.body?.userId);
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
-    if (!pool) return res.status(400).json({ error: "Cancel requires DB enabled" });
-
     const found = await pool.query(
-      "SELECT stripe_subscription_id FROM users WHERE id=$1",
+      "SELECT stripe_subscription_id, stripe_customer_id FROM users WHERE id=$1",
       [userIdNum]
     );
-
-    if (!found.rows.length)
-      return res.status(404).json({ error: "User not found" });
+    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
 
     const subId = String(found.rows[0].stripe_subscription_id || "");
-    if (!subId)
-      return res.status(400).json({ error: "No active subscription on user" });
+    const customerId = String(found.rows[0].stripe_customer_id || "");
 
-    // Retrieve subscription first
-    const sub = await stripe.subscriptions.retrieve(subId);
+    let cancelledIds = [];
 
-    if (sub.status === "canceled") {
-      await pool.query(
-        `UPDATE users
-         SET subscription_status='inactive',
-             plan='trial',
-             stripe_subscription_id=''
-         WHERE id=$1`,
-        [userIdNum]
+    if (!subId && customerId) {
+      const subs = await stripe.subscriptions.list({
+        customer: customerId,
+        status: "all",
+        limit: 20,
+      });
+
+      const toCancel = subs.data.filter(
+        (s) => s.status === "active" || s.status === "trialing"
       );
-      return res.json({ success: true, message: "Already canceled" });
-    }
 
-    await stripe.subscriptions.cancel(subId);
+      if (!toCancel.length) {
+        return res.status(400).json({ error: "No active subscription found for this user" });
+      }
+
+      await Promise.all(
+        toCancel.map(async (s) => {
+          await stripe.subscriptions.cancel(s.id);
+          cancelledIds.push(s.id);
+        })
+      );
+    } else if (subId) {
+      const sub = await stripe.subscriptions.retrieve(subId);
+      if (sub.status !== "canceled") {
+        await stripe.subscriptions.cancel(subId);
+      }
+      cancelledIds.push(subId);
+    } else {
+      return res.status(400).json({ error: "No active subscription on user" });
+    }
 
     await pool.query(
       `UPDATE users
@@ -675,38 +687,9 @@ app.post("/cancel-subscription", requireAuth, async (req, res) => {
       [userIdNum]
     );
 
-    return res.json({ success: true });
-
+    return res.json({ success: true, cancelled: cancelledIds });
   } catch (err) {
     console.error("POST /cancel-subscription error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-});
-
-// -------------------- AUTH: current user --------------------
-// contract: GET /me
-// Requires Bearer token
-app.get("/me", requireAuth, async (req, res) => {
-  try {
-    if (!pool) return res.status(400).json({ error: "DB not configured" });
-
-    // assuming requireAuth sets req.user.id (adjust if your middleware differs)
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const r = await pool.query(
-      `SELECT id, email, plan, subscription_status, trial_ends,
-              stripe_subscription_id, stripe_customer_id
-       FROM users
-       WHERE id=$1`,
-      [userId]
-    );
-
-    if (!r.rows.length) return res.status(404).json({ error: "User not found" });
-
-    return res.json({ user: r.rows[0] });
-  } catch (err) {
-    console.error("GET /me error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
   }
 });
