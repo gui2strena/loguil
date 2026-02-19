@@ -1913,13 +1913,14 @@ async function handleChangePassword(e) {
         const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
         const limit = PLAN_LIMITS[currentUser.plan] || 999;
 
-        if (activeOrders.length >= limit) {
-          showToast(`${EN.banners.limitReached} ${limit} ${EN.banners.ordersPerMonth} ${EN.banners.limitReachedSuffix}`, 'error');
-          showView('subscription');
-          return;
-        }
-      }
-
+      if (activeOrders.length >= limit) {
+  showToast(
+    `You have reached the limit of ${limit} orders this month. Please upgrade to continue.`,
+    'error'
+  );
+  showView('subscription');
+  return;
+}
       editingOrder = order;
       
       // Refresh modal
