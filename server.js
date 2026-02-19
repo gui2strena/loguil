@@ -705,7 +705,7 @@ app.post("/orders", requireAuth, async (req, res) => {
     // Enforce plan limits (server-side)
 const PLAN_LIMITS = {
   trial: 999,     // adjust if your trial limit differs
-  starter: 100,
+  starter: 6,
   pro: 1000,
   growth: 999999 // unlimited
 };
