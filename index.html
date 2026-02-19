@@ -327,12 +327,13 @@
       AOA: { symbol: 'Kz', name: EN.currencies.AOA, locale: 'pt-AO', code: 'AOA' }
     };
 
-    const PLAN_LIMITS = {
-      trial: 999,
-      starter: 100,
-      pro: 1000,
-      growth: 999999
-    };
+        // Enforce plan limits (server-side)
+const PLAN_LIMITS = {
+  trial: 999,     // adjust if your trial limit differs
+  starter: 100,
+  pro: 1000,
+  growth: 999999 // unlimited
+};
 
     const MONTH_NAMES = [
       EN.months.january, EN.months.february, EN.months.march, EN.months.april,
