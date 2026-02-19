@@ -1545,10 +1545,12 @@ async function handleChangePassword(e) {
 
       const monthOrders = getOrdersForMonth();
       const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
-      const limit = PLAN_LIMITS[currentUser.plan];
+      const limit = PLAN_LIMITS[currentUser.plan] ?? 0;
+
 
       document.getElementById('current-plan-name').textContent = planNames[currentUser.plan];
-      document.getElementById('usage-count').textContent = activeOrders.length;
+      document.getElementById('usage-count').textContent = `${activeOrders.length} / ${limit}`;
+
       
       if (currentUser.plan === 'trial') {
         const trialEnd = new Date(currentUser.trial_ends);
