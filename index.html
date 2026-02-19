@@ -1527,8 +1527,8 @@ async function handleChangePassword(e) {
 
       if (activeOrders.length >= limit * 0.9 && limit !== 999999) {
         document.getElementById('limit-banner').classList.remove('hidden');
-        document.getElementById('limit-message').textContent = 
-          `${EN.banners.approachingLimit} ${currentUser.plan.toUpperCase()} ${EN.banners.plan} ${activeOrders.length}/${limit} ${EN.banners.trialDays}`;
+        document.getElementById('limit-message').textContent =
+        `You are approaching the limit of ${currentUser.plan.toUpperCase()} plan: ${activeOrders.length}/${limit} orders this month. Upgrade now.`;
       } else {
         document.getElementById('limit-banner').classList.add('hidden');
       }
