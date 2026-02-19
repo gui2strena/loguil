@@ -1997,8 +1997,7 @@ async function handleChangePassword(e) {
       previewEl.textContent = formatCurrency(profit);
       previewEl.className = `text-2xl font-extrabold ${profit >= 0 ? 'profit-positive' : 'profit-negative'}`;
     }
-
-   async function handleOrderSubmit(e) {
+ async function handleOrderSubmit(e) {
   e.preventDefault();
 
   const btn = document.getElementById('submit-btn');
@@ -2022,48 +2021,59 @@ async function handleChangePassword(e) {
     created_at: editingOrder ? editingOrder.created_at : new Date().toISOString()
   };
 
-    const payload = {
-  userId: Number(currentUser.__backendId),
-                                           // backend espera isso
-  order: orderData,                        // backend espera isso
-  ...orderData                             // mantém compatibilidade
-};
+  const payload = {
+    userId: Number(currentUser.__backendId),
+    order: orderData,
+    ...orderData
+  };
 
   try {
-  if (editingOrder) {
-    await api(`/orders/${encodeURIComponent(editingOrder.__backendId)}`, {
-      method: "PUT",
-      body: JSON.stringify(payload)
-    });
-  } else {
-    await api(`/orders`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    // Frontend plan limit check (only when creating a new order)
+    if (!editingOrder) {
+      const monthOrders = getOrdersForMonth();
+      const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
+      const limit = PLAN_LIMITS[currentUser.plan] ?? 0;
+
+      if (limit !== 999999 && activeOrders.length >= limit) {
+        showToast("Plan limit reached. Upgrade to add more orders.", "error");
+        return;
+      }
+    }
+
+    if (editingOrder) {
+      await api(`/orders/${encodeURIComponent(editingOrder.__backendId)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      await api(`/orders`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    }
+
+    await loadOrdersFromBackend();
+    updateDashboard();
+    filterOrders();
+
+    showToast(
+      editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated,
+      "success"
+    );
+    closeOrderModal();
+
+  } catch (err) {
+    const msg =
+      (err && err.message) ||
+      (typeof err === "string" ? err : "") ||
+      (err ? JSON.stringify(err) : "") ||
+      "Unknown error creating order";
+    showToast(msg, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = EN.orderModal.save;
   }
-
-  await loadOrdersFromBackend();
-  updateDashboard();
-  filterOrders();
-
-  showToast(
-    editingOrder ? EN.orderModal.orderUpdated : EN.orderModal.orderCreated,
-    "success"
-  );
-  closeOrderModal();
-
-} catch (err) {
-  const msg =
-    (err && err.message) ||
-    (typeof err === "string" ? err : "") ||
-    (err ? JSON.stringify(err) : "") ||
-    "Unknown error creating order";
-  showToast(msg, "error");
-} finally {
-  btn.disabled = false;
-  btn.textContent = EN.orderModal.save;
-} 
-} 
+}
     
     // ============================================================================
     // DATA HANDLER
