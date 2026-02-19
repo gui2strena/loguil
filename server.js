@@ -683,6 +683,34 @@ app.post("/cancel-subscription", requireAuth, async (req, res) => {
   }
 });
 
+// -------------------- AUTH: current user --------------------
+// contract: GET /me
+// Requires Bearer token
+app.get("/me", requireAuth, async (req, res) => {
+  try {
+    if (!pool) return res.status(400).json({ error: "DB not configured" });
+
+    // assuming requireAuth sets req.user.id (adjust if your middleware differs)
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const r = await pool.query(
+      `SELECT id, email, plan, subscription_status, trial_ends,
+              stripe_subscription_id, stripe_customer_id
+       FROM users
+       WHERE id=$1`,
+      [userId]
+    );
+
+    if (!r.rows.length) return res.status(404).json({ error: "User not found" });
+
+    return res.json({ user: r.rows[0] });
+  } catch (err) {
+    console.error("GET /me error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
 // -------------------- orders --------------------
 // POST /orders   body: { userId, order }
 app.post("/orders", requireAuth, async (req, res) => {
