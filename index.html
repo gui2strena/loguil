@@ -466,6 +466,12 @@ async function refreshUserFromServer() {
   };
 
   updateSubscriptionStatus();
+ 
+ // Persist updated user so reload shows the correct plan
+localStorage.setItem("currentUserId", String(currentUser.__backendId || ""));
+localStorage.setItem("currentUserProfile", JSON.stringify(currentUser));
+localStorage.setItem("currentUser", JSON.stringify(currentUser));
+
 }
 
 function handleCheckoutAutoRefresh() {
