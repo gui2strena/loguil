@@ -467,6 +467,36 @@ async function refreshUserFromServer() {
 
   updateSubscriptionStatus();
 }
+
+function handleCheckoutAutoRefresh() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("checkout") !== "success") return;
+
+  params.delete("checkout");
+  const clean = window.location.pathname + (params.toString() ? `?${params}` : "");
+  window.history.replaceState({}, "", clean);
+
+  const start = Date.now();
+  const maxMs = 30000;
+  const intervalMs = 2000;
+
+  const timer = setInterval(async () => {
+    try {
+      await refreshUserFromServer();
+
+      if (currentUser?.plan && currentUser.plan !== "trial") {
+        clearInterval(timer);
+        showToast(EN.subscription.planActivated, "success");
+        return;
+      }
+
+      if (Date.now() - start > maxMs) {
+        clearInterval(timer);
+        showToast("Payment received. Sync may take a moment — please refresh if needed.", "info");
+      }
+    } catch {}
+  }, intervalMs);
+}
    
 async function loadOrdersFromBackend() {
   if (!currentUser?.__backendId) return;
@@ -2172,6 +2202,10 @@ if (savedUserId && token) {
     }
 
     init();
+
+    document.addEventListener("DOMContentLoaded", () => {
+      handleCheckoutAutoRefresh();
+    }); 
   </script>
  <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c02ceb42657944f',t:'MTc2ODc4ODc0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
