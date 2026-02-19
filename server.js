@@ -583,14 +583,13 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
     if (!stripe) return res.status(400).json({ error: "Stripe not configured" });
 
     const userIdNum = toInt(req.body?.userId);
-    const plan = (req.body?.plan || "").toString().trim(); // starter | pro | growth
+    const plan = (req.body?.plan || "").toString().trim();
 
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!assertAuthMatches(req, res, userIdNum)) return;
     if (!plan) return res.status(400).json({ error: "Missing plan" });
 
-    const PRICE_STARTER =
-      process.env.STRIPE_PRICE_STARTER || process.env.STRIPE_PRICE_BASIC || "";
+    const PRICE_STARTER = process.env.STRIPE_PRICE_STARTER || "";
     const PRICE_PRO = process.env.STRIPE_PRICE_PRO || "";
     const PRICE_GROWTH = process.env.STRIPE_PRICE_GROWTH || "";
 
@@ -602,8 +601,6 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
 
     if (!priceId) return res.status(400).json({ error: "Price not configured for this plan" });
 
-    // ✅ Production: set FRONTEND_URL in Render (ex: https://loguil.onrender.com)
-    // Fallback to localhost only for local dev.
     const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
     const session = await stripe.checkout.sessions.create({
@@ -619,11 +616,13 @@ app.post("/create-checkout-session", requireAuth, async (req, res) => {
     });
 
     return res.json({ success: true, url: session.url });
+
   } catch (err) {
     console.error("POST /create-checkout-session error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
   }
 });
+
 
 // -------------------- STRIPE: cancel subscription --------------------
 // contract: POST /cancel-subscription  { userId }
@@ -636,31 +635,48 @@ app.post("/cancel-subscription", requireAuth, async (req, res) => {
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
-    // Load user from DB
     if (!pool) return res.status(400).json({ error: "Cancel requires DB enabled" });
 
     const found = await pool.query(
-      "SELECT stripe_subscription_id, stripe_customer_id FROM users WHERE id=$1",
+      "SELECT stripe_subscription_id FROM users WHERE id=$1",
       [userIdNum]
     );
-    if (!found.rows.length) return res.status(404).json({ error: "User not found" });
+
+    if (!found.rows.length)
+      return res.status(404).json({ error: "User not found" });
 
     const subId = String(found.rows[0].stripe_subscription_id || "");
-    if (!subId) return res.status(400).json({ error: "No active subscription on user" });
+    if (!subId)
+      return res.status(400).json({ error: "No active subscription on user" });
 
-    // Cancel now (simple). If you prefer end of period: use { cancel_at_period_end: true }
+    // Retrieve subscription first
+    const sub = await stripe.subscriptions.retrieve(subId);
+
+    if (sub.status === "canceled") {
+      await pool.query(
+        `UPDATE users
+         SET subscription_status='inactive',
+             plan='trial',
+             stripe_subscription_id=''
+         WHERE id=$1`,
+        [userIdNum]
+      );
+      return res.json({ success: true, message: "Already canceled" });
+    }
+
     await stripe.subscriptions.cancel(subId);
 
-    // Update DB immediately (webhook will also sync later)
     await pool.query(
       `UPDATE users
        SET subscription_status='inactive',
-           plan='trial'
+           plan='trial',
+           stripe_subscription_id=''
        WHERE id=$1`,
       [userIdNum]
     );
 
     return res.json({ success: true });
+
   } catch (err) {
     console.error("POST /cancel-subscription error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
