@@ -702,6 +702,59 @@ app.post("/orders", requireAuth, async (req, res) => {
     if (!userIdNum) return res.status(400).json({ error: "Missing/invalid userId" });
     if (!assertAuthMatches(req, res, userIdNum)) return;
 
+    // Enforce plan limits (server-side)
+const PLAN_LIMITS = {
+  trial: 20,     // adjust if your trial limit differs
+  starter: 100,
+  pro: 500,
+  growth: 999999 // unlimited
+};
+
+let plan = "trial";
+if (pool) {
+  const u = await pool.query("SELECT plan FROM users WHERE id=$1", [userIdNum]);
+  if (!u.rows.length) return res.status(404).json({ error: "User not found" });
+  plan = String(u.rows[0].plan || "trial");
+} else {
+  const u = mem.users.find((x) => Number(x.id) === userIdNum);
+  if (!u) return res.status(404).json({ error: "User not found" });
+  plan = String(u.plan || "trial");
+}
+
+const limit = PLAN_LIMITS[plan] ?? 0;
+if (limit !== 999999) {
+  let used = 0;
+
+  if (pool) {
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS c
+       FROM orders
+       WHERE user_id=$1
+         AND status <> 'cancelled'
+         AND created_at >= date_trunc('month', NOW())
+         AND created_at <  (date_trunc('month', NOW()) + interval '1 month')`,
+      [userIdNum]
+    );
+    used = r.rows[0].c;
+  } else {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    used = mem.orders.filter(o =>
+      Number(o.user_id) === userIdNum &&
+      String(o.status || "") !== "cancelled" &&
+      new Date(o.created_at || 0) >= start &&
+      new Date(o.created_at || 0) < end
+    ).length;
+  }
+
+  if (used >= limit) {
+    return res.status(403).json({
+      error: `Plan limit reached (${used}/${limit}). Please upgrade your plan to add more orders.`
+    });
+  }
+}
+
     const okUser = await userExists(userIdNum);
     if (!okUser) return res.status(404).json({ error: "User not found" });
 
