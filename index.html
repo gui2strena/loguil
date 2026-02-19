@@ -1525,14 +1525,27 @@ async function handleChangePassword(e) {
       const activeOrders = monthOrders.filter(o => o.status !== 'cancelled');
       const limit = PLAN_LIMITS[currentUser.plan] || 999;
 
-      if (activeOrders.length >= limit * 0.9 && limit !== 999999) {
-        document.getElementById('limit-banner').classList.remove('hidden');
-        document.getElementById('limit-message').textContent =
-        `You are approaching the limit of ${currentUser.plan.toUpperCase()} plan: ${activeOrders.length}/${limit} orders this month. Upgrade now.`;
-      } else {
-        document.getElementById('limit-banner').classList.add('hidden');
-      }
+     if (limit !== 999999) {
 
+     if (activeOrders.length >= limit) {
+    // Reached limit
+    document.getElementById('limit-banner').classList.remove('hidden');
+    document.getElementById('limit-message').textContent =
+      `You have reached the limit of ${currentUser.plan.toUpperCase()} plan: ${activeOrders.length}/${limit} orders this month. Upgrade now.`;
+
+  } else if (activeOrders.length >= limit * 0.9) {
+    // Approaching limit (90%+)
+    document.getElementById('limit-banner').classList.remove('hidden');
+    document.getElementById('limit-message').textContent =
+      `You are approaching the limit of ${currentUser.plan.toUpperCase()} plan: ${activeOrders.length}/${limit} orders this month.`;
+
+  } else {
+    document.getElementById('limit-banner').classList.add('hidden');
+  }
+
+} else {
+  document.getElementById('limit-banner').classList.add('hidden');
+}
       updateCurrentPlanDisplay();
     }
 
