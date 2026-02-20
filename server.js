@@ -117,28 +117,43 @@ async function updateUserBillingByCustomerId({
   stripe_customer_id,
   subscription_status,
   stripe_subscription_id,
+  current_period_start,
+  current_period_end,
+  cancel_at_period_end,
 }) {
   if (!stripe_customer_id) return;
+
+  // Normalize values
+  const subStatus = String(subscription_status || "active");
+  const subId = String(stripe_subscription_id || "");
+  const custId = String(stripe_customer_id || "");
+
+  // Allow nulls (keeps DB clean)
+  const cps = current_period_start ? String(current_period_start) : null;
+  const cpe = current_period_end ? String(current_period_end) : null;
+  const cap = !!cancel_at_period_end;
 
   if (pool) {
     await pool.query(
       `UPDATE users
        SET subscription_status=$1,
-           stripe_subscription_id=$2
-       WHERE stripe_customer_id=$3`,
-      [
-        String(subscription_status || "active"),
-        String(stripe_subscription_id || ""),
-        String(stripe_customer_id || ""),
-      ]
+           stripe_subscription_id=$2,
+           current_period_start=$3,
+           current_period_end=$4,
+           cancel_at_period_end=$5
+       WHERE stripe_customer_id=$6`,
+      [subStatus, subId, cps, cpe, cap, custId]
     );
     return;
   }
 
-  const u = mem.users.find((x) => x.stripe_customer_id === stripe_customer_id);
+  const u = mem.users.find((x) => x.stripe_customer_id === custId);
   if (!u) return;
-  u.subscription_status = String(subscription_status || "active");
-  u.stripe_subscription_id = String(stripe_subscription_id || "");
+  u.subscription_status = subStatus;
+  u.stripe_subscription_id = subId;
+  u.current_period_start = cps;
+  u.current_period_end = cpe;
+  u.cancel_at_period_end = cap;
 }
 
 // -------------------- STRIPE WEBHOOK (MUST be BEFORE express.json) --------------------
