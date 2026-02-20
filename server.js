@@ -178,22 +178,37 @@ app.post("/stripe/webhook", express.raw({ type: "application/json" }), async (re
     }
 
     if (
-      event.type === "customer.subscription.updated" ||
-      event.type === "customer.subscription.deleted"
-    ) {
-      const sub = event.data.object;
-      const customerId = sub.customer;
-      const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
+  event.type === "customer.subscription.created" ||
+  event.type === "customer.subscription.updated" ||
+  event.type === "customer.subscription.deleted"
+) {
+  const sub = event.data.object;
 
-      const subscription_status =
-        status === "active" || status === "trialing" ? "active" : "inactive";
+  const customerId = sub.customer;
+  const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
 
-      await updateUserBillingByCustomerId({
-        stripe_customer_id: customerId || "",
-        subscription_status,
-        stripe_subscription_id: sub.id || "",
-      });
-    }
+  const subscription_status =
+    status === "active" || status === "trialing" ? "active" : "inactive";
+
+  const current_period_start = sub.current_period_start
+    ? new Date(sub.current_period_start * 1000).toISOString()
+    : null;
+
+  const current_period_end = sub.current_period_end
+    ? new Date(sub.current_period_end * 1000).toISOString()
+    : null;
+
+  const cancel_at_period_end = !!sub.cancel_at_period_end;
+
+  await updateUserBillingByCustomerId({
+    stripe_customer_id: customerId || "",
+    subscription_status,
+    stripe_subscription_id: sub.id || "",
+    current_period_start,
+    current_period_end,
+    cancel_at_period_end,
+  });
+}
 
     return res.json({ received: true });
   } catch (err) {
