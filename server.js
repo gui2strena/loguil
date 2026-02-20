@@ -198,7 +198,6 @@ app.post("/stripe/webhook", express.raw({ type: "application/json" }), async (re
   event.type === "customer.subscription.deleted"
 ) {
   const sub = event.data.object;
-
   const customerId = sub.customer;
   const status = sub.status; // active, trialing, past_due, canceled, unpaid, etc.
 
